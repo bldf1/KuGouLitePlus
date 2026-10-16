@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">酷狗概念版+</string>
+    <!-- LSPosed 模块列表介绍（读 <application> 的 android:description）：一句话 + 模块入口 -->
+    <string name="lsposed_desc">酷狗概念版增强 长按底栏呼出设置</string>
+</resources>

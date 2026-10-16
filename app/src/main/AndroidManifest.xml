@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:description="@string/lsposed_desc"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light">
+
+        <!-- Xposed 模块声明（模块 APP 无界面，设置入口寄生在酷狗概念版主界面）。
+             只保留新版 API 所需：列表介绍走 <application android:description>，无需 xposeddescription。 -->
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposedminversion" android:value="100" />
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
+
+        <!-- 词幕（io.github.proify.lyricon）提供者声明：
+             词幕的「歌词提供者列表」按这组 meta-data 扫描已装应用来发现提供者，
+             缺了它们 → 模块能运行时投词，但不会出现在词幕的提供者列表里（R38 修复）。
+             R52e：按需求加回 description（提供者卡片简介「提供酷狗概念版歌词」）。 -->
+        <meta-data android:name="lyricon_module" android:value="true" />
+        <meta-data android:name="lyricon_module_author" android:value="bldf1" />
+        <meta-data android:name="lyricon_module_description" android:value="提供酷狗概念版歌词。" />
+        <meta-data android:name="lyricon_module_tags" android:resource="@array/lyricon_module_tags" />
+
+    </application>
+
+</manifest>

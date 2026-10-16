@@ -1,0 +1,126 @@
+plugins {
+    id 'com.android.application'
+}
+
+// ⭐ R76：release 专用签名（口令见根目录 keystore.properties，该文件已被 .gitignore 排除）
+// 背景：**首个公开版本的签名 = 以后所有更新必须匹配的签名**。此前 release 走 debug 签名，
+// 而 debug keystore 是**跟机器走**的 ⇒ 换台机器构建就变成另一个签名 ⇒ 用户只能卸载重装（配置全丢）。
+// 兜底：读不到 keystore.properties 就回退 debug 签名 —— 保证别人 clone 下来能直接构建。
+// ⚠️ 只作用于 release；debug 构建仍用 debug key（本机 install -r 覆盖安装不受影响）。
+def ksPropsFile = rootProject.file('keystore.properties')
+def ksProps = new Properties()
+def hasReleaseKey = ksPropsFile.exists()
+if (hasReleaseKey) {
+    ksPropsFile.withInputStream { ksProps.load(it) }
+}
+
+// ⭐ R99：**同一份信息只该有一个来源** —— 构建期校验面板里的 REPO_URL 与 module.prop 的 source 一致。
+// 背景（真机实锤）：这两处分别写死过仓库地址，改了一个忘了另一个 ⇒ 用户看到面板「关于」里
+// 仍是旧链接。人眼检查靠不住，把它变成构建期硬校验：不一致就直接构建失败。
+tasks.register('verifyModuleMeta') {
+    doLast {
+        def propFile = file('src/main/resources/META-INF/xposed/module.prop')
+        def ktFile = file('src/main/java/com/bldf1/kugoulite/plus/NativeSettingsPanel.kt')
+        if (!propFile.exists() || !ktFile.exists()) {
+            throw new GradleException('verifyModuleMeta: 找不到 module.prop 或 NativeSettingsPanel.kt')
+        }
+        def prop = propFile.getText('UTF-8')
+        def srcMatcher = (prop =~ /(?m)^source=(.+)$/)
+        if (!srcMatcher.find()) throw new GradleException('verifyModuleMeta: module.prop 里没有 source= 行')
+        def srcInProp = srcMatcher.group(1).trim()
+        def kt = ktFile.getText('UTF-8')
+        def urlMatcher = (kt =~ /REPO_URL\s*=\s*"([^"]+)"/)
+        if (!urlMatcher.find()) throw new GradleException('verifyModuleMeta: NativeSettingsPanel.kt 里找不到 REPO_URL')
+        def urlInKt = urlMatcher.group(1).trim()
+        if (srcInProp != urlInKt) {
+            throw new GradleException(
+                "verifyModuleMeta 失败：两处仓库地址不一致，必须一起改 ——\n" +
+                "  module.prop 的 source  = ${srcInProp}\n" +
+                "  面板 REPO_URL          = ${urlInKt}")
+        }
+        println "verifyModuleMeta ✓ 仓库地址两处一致：${urlInKt}"
+    }
+}
+tasks.named('preBuild') { dependsOn 'verifyModuleMeta' }
+
+android {
+    namespace 'com.bldf1.kugoulite.plus'
+    compileSdk 37
+    buildToolsVersion "37.0.0"
+
+    defaultConfig {
+        applicationId "com.bldf1.kugoulite.plus"
+        minSdk 36
+        targetSdk 37
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            release {
+                storeFile rootProject.file(ksProps['storeFile'])
+                storePassword ksProps['storePassword']
+                keyAlias ksProps['keyAlias']
+                keyPassword ksProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // ⚠️ Round 36：这里曾是 false —— 结果 release 包和 debug 一样「全量依赖原样打进去」。
+            // 参考项目 OneDongua/KugouLiteProvider 的 release 包只有 0.42MB（R8 后全包仅 430 个类型引用），
+            // 差距不在依赖多少，而在**有没有开裁剪**。开 minify 后 dex 从 ~9.7MB 降到亚 MB 级。
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // ⭐ R76：有 keystore.properties 就用**专用 release 签名**（公开分发必须签名稳定）；
+            // 读不到则回退 debug 签名（别人 clone 也能直接构建）。
+            // ⚠️ 换成专用签名后，本机已安装的 debug 包无法被 release 包覆盖安装（需先卸载 debug 包）。
+            signingConfig hasReleaseKey ? signingConfigs.release : signingConfigs.debug
+        }
+        // debug 故意保持不混淆：日常排查要可读的堆栈与可下单点的代码。
+        // 需要小包时用 :app:assembleRelease。
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// 与 compileOptions 的 Java 17 对齐，避免 "Inconsistent JVM-target compatibility"
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+// ⚠️ Round 25：这里曾挂着 Compose + Miuix + lifecycle + savedstate 一大串依赖
+// （面板用 Jetpack Compose + Miuix 实现），APK 由 **2.7MB → 31MB**。
+// 面板已改回原生 View（NativeSettingsPanel.kt），整串依赖随之移除。
+//
+// Round 35：为「词幕(Lyricon)歌词提供器」重新引入**第一组**第三方运行时依赖
+// （两者都是 Apache-2.0）。KRC 解密/解析没有引 krckit，而是自己移植（见 lyric/），
+// 因为 krckit 依赖 kotlinx-serialization 编译器插件，会牵进 Compose 那条老路。
+dependencies {
+    // libxposed 现代 API（compileOnly，运行时由框架提供）
+    compileOnly 'io.github.libxposed:api:102.0.0'
+
+    // 词幕提供器 SDK：负责 ProviderInfo/AIDL/Binder 注册与重连补发
+    implementation('io.github.proify.lyricon:provider:0.1.70') {
+        // appcompat-resources / vectordrawable 只被 ProviderLogo.fromDrawable(Context, resId)
+        // 用到（连带 drag: AppCompatResources 取图再 toBitmap），我们 logo 传 null、永不走那条路
+        // ⇒ 裁掉，省掉三个 AAR 的 dex 与资源
+        exclude group: 'androidx.appcompat', module: 'appcompat-resources'
+        exclude group: 'androidx.vectordrawable'
+    }
+
+    // ⚠️ provider 0.1.70 的 ProviderV27Impl / RemoteServiceProxy 内部用了
+    //    kotlinx.coroutines（Dispatchers.Main.immediate 等），但它的 POM 与 Gradle
+    //    metadata **都没有声明**这个依赖 —— 不补上，实例化 ProviderV27Impl 时会
+    //    NoClassDefFoundError。参考实现也是自己手动加的。
+    // Round 47：1.10.2 → 1.11.0（2026-10 查 Maven Central 为最新稳定版；
+    // 其余依赖 Gradle 9.8.1 / AGP 9.4.1 / libxposed 102.0.0 / lyricon 0.1.70 均已是最新）
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
+}

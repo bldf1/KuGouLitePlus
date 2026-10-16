@@ -1,0 +1,59 @@
+# ============================================================
+#  酷狗概念版+ (KuGouLiteVipAutoClaim) .gitignore
+#  原则：签名材料 / 本机路径 / 密钥文件 一律不入库
+# ============================================================
+
+# ---------- 签名材料（绝不能入库）----------
+# 自建 keystore 一律不入库；release 签名请把口令放本机
+# local.properties / 环境变量，不要写进 build.gradle。
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.der
+*.bks
+*.key
+*.pk8
+keystore.properties
+signing.properties
+release.properties
+secrets.properties
+
+# ---------- 本机配置（含 SDK 路径，禁止入库）----------
+local.properties
+
+# ---------- 密钥 / 环境文件 ----------
+.env
+.env.*
+!.env.example
+*.token
+*credential*.properties
+*password*.txt
+
+# ---------- Gradle ----------
+.gradle/
+build/
+app/build/
+.kotlin/
+
+# ---------- IDE ----------
+.idea/
+*.iml
+*.hprof
+
+# ---------- 调试取证残留 ----------
+javap_*.txt
+*.log
+
+# ---------- 构建产物 ----------
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# ---------- 系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini

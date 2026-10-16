@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed 静态作用域：只在酷狗概念版里装钩子 -->
+    <string-array name="xposed_scope">
+        <item>com.kugou.android.lite</item>
+    </string-array>
+    <!-- 词幕（io.github.proify.lyricon）提供者能力标签：
+         $syllable = 逐字歌词（卡拉OK），$translation = 翻译歌词。
+         词幕的「提供者列表」按 Manifest 里 lyricon_module* 声明扫描发现，
+         tags 告诉词幕本提供者支持哪些能力。 -->
+    <string-array name="lyricon_module_tags">
+        <item>$syllable</item>
+        <item>$translation</item>
+    </string-array>
+</resources>

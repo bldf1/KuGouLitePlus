@@ -1,0 +1,7 @@
+name=酷狗概念版+
+description=酷狗概念版增强：每日自动领取 VIP（可自动升级、自动完成听歌任务）、界面净化去广告、液态玻璃悬浮底栏、词幕歌词提供、拦截广告请求，另含签名校验与更新检测开关。长按底栏 0.8 秒呼出设置。
+author=bldf1
+source=https://github.com/bldf1/KuGouLitePlus
+minApiVersion=102
+targetApiVersion=102
+staticScope=true

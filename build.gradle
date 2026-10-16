@@ -1,0 +1,7 @@
+// 根构建文件：AGP 9.4.1（当前最新稳定版，需 Gradle 9.6+ / JDK 17+）
+//
+// Round 25：面板改回原生 View 后，不再需要外部 Kotlin / Compose 插件，
+// Kotlin 由 AGP 内置提供（builtInKotlin 默认开，见 gradle.properties）。
+plugins {
+    id 'com.android.application' version '9.4.1' apply false
+}
