@@ -45,7 +45,9 @@ object ClaimWorker {
         // 只在主进程执行领取逻辑（support/message 等子进程直接跳过，
         // 避免多进程重复请求广告/领取接口）
         val processName = try {
-            android.app.Application.getProcessName()
+            // getProcessName 是 API 28+；27 及以下退回 applicationInfo.processName
+            if (android.os.Build.VERSION.SDK_INT >= 28) android.app.Application.getProcessName()
+            else context.applicationInfo.processName ?: ""
         } catch (_: Throwable) {
             context.applicationInfo.processName ?: ""
         }
@@ -61,6 +63,7 @@ object ClaimWorker {
 
         // 同步广告请求拦截开关
         NetCapture.setBlockAdNet(Settings.isBlockAdNet(appContext))
+        NetCapture.setBlockTaskPromo(Settings.isBlockTaskPromo(appContext))
 
         // 防检测自检：验证签名 Hook 拦截与缓存一致性
         IntegrityBypass.selfTest(appContext)

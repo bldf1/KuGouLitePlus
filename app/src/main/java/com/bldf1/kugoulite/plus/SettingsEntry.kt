@@ -462,8 +462,14 @@ object SettingsEntry {
 
     /** 底部系统导航条（手势条）高度：弹层贴屏幕底时补在内容下方 */
     private fun navBarBottomInset(activity: Activity): Int = try {
-        activity.window?.decorView?.rootWindowInsets
-            ?.getInsets(WindowInsets.Type.systemBars())?.bottom ?: 0
+        val insets = activity.window?.decorView?.rootWindowInsets
+        if (insets == null) 0
+        else if (android.os.Build.VERSION.SDK_INT >= 30) {
+            insets.getInsets(WindowInsets.Type.systemBars()).bottom
+        } else {
+            @Suppress("DEPRECATION")
+            insets.systemWindowInsetBottom
+        }
     } catch (_: Throwable) {
         0
     }
@@ -568,6 +574,11 @@ object SettingsEntry {
                         "在网络层直接拦掉广告请求并返回空响应，覆盖全局与 GDT 广告 SDK",
                         Settings.isBlockAdNet(ctx)
                     ),
+                    ToggleRow(
+                        Settings.KEY_BLOCK_TASK_PROMO, "屏蔽任务/赚钱推广",
+                        "拦掉「赚钱」页的任务与 VIP 到期提示接口：金币特效、「即将过期」提醒不再出现",
+                        Settings.isBlockTaskPromo(ctx)
+                    ),
                     row(Settings.KEY_UI_SPLASH, "去开屏广告", "跳过开屏广告，直接进首页"),
                     row(Settings.KEY_UI_BANNER, "去首页 Banner 广告", "隐藏发现页 MosaicView 广告轮播位"),
                     row(Settings.KEY_UI_DISCOVER_ADS, "去发现页广告轮播", "拦截 Discovery 系列广告视图出生"),
@@ -650,6 +661,10 @@ object SettingsEntry {
                 Settings.setFeature(ctx, Settings.KEY_BLOCK_AD_NET, value)
                 NetCapture.setBlockAdNet(value)
                 GdtAdBlocker.setEnabled(value)
+            }
+            Settings.KEY_BLOCK_TASK_PROMO -> {
+                Settings.setFeature(ctx, Settings.KEY_BLOCK_TASK_PROMO, value)
+                NetCapture.setBlockTaskPromo(value)
             }
 
             // 悬浮底栏：setFeature 的 ui_ 分支只做 rescan/restoreRule，

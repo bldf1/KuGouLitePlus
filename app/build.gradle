@@ -50,10 +50,16 @@ android {
 
     defaultConfig {
         applicationId "com.bldf1.kugoulite.plus"
-        minSdk 36
-        targetSdk 37
-        versionCode 1
-        versionName "1.0"
+        // ⚠️ minSdk 原来是 36（Android 16）—— 等于只能装在最新系统上，太窄了。
+        // 降到 27（Android 8.1）：这是 libxposed API 102 所要求的最低 Android 版本。
+        // 模块本身几乎没有直接调用高版本 API（绝大多数框架交互都走反射），
+        // 因此 8.1 以上应该都能跑；宿主内部差异可能让个别规则的时序不同，但不影响功能。
+        minSdk 27
+        // targetSdk 原来写的是 37 —— 那是预览版号（Android 17 Developer Preview），
+        // 不是正式 SDK。改成 34（正式、稳定、对模块无副作用）。
+        targetSdk 34
+        versionCode 2
+        versionName "1.1"
     }
 
     signingConfigs {

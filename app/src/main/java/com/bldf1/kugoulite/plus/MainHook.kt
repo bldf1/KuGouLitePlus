@@ -41,6 +41,9 @@ class MainHook : XposedModule() {
         if (installed) return
         installed = true
 
+        // 这是 libxposed 的 XposedInterface.Param#getDefaultClassLoader（框架自己传入的类加载器），
+        // 与 java.lang 的高版本 API 无关；lint 把它误判为 NewApi，这里局部抑制。
+        @Suppress("NewApi")
         val classLoader = param.defaultClassLoader
 
         ModuleLog.log("========== 模块已加载 ==========")

@@ -17,6 +17,7 @@ object Settings {
     const val KEY_AUTO_UPGRADE = "auto_upgrade"
     const val KEY_LISTEN_TASK = "listen_task"
     const val KEY_BLOCK_AD_NET = "block_ad_net"
+    const val KEY_BLOCK_TASK_PROMO = "block_task_promo"
 
     // ===== 界面净化（每控件一个开关；Round 52 细分）=====
     const val KEY_UI_SPLASH = "ui_splash_ad"
@@ -105,6 +106,15 @@ object Settings {
      * 是否网络层拦截广告请求（默认开启）
      */
     fun isBlockAdNet(ctx: Context): Boolean = getPrefs(ctx).getBoolean(KEY_BLOCK_AD_NET, true)
+
+    /**
+     * 是否屏蔽「任务 / 赚钱推广」相关接口（默认开启）
+     *
+     * 拦截对象：赚钱页任务中心、VIP 到期提示等 —— 这些接口返回的数据会触发
+     * 「金币飞入动画」「即将过期提醒」等一次性推广元素；这些元素**不在页面视图树里**
+     * 或是一次性动画，视图层规则拦不住 ⇒ 改在网络层让 app 认为"没有任务/没有到期提示"。
+     */
+    fun isBlockTaskPromo(ctx: Context): Boolean = getPrefs(ctx).getBoolean(KEY_BLOCK_TASK_PROMO, true)
 
     fun setAutoUpgrade(ctx: Context, value: Boolean) {
         getPrefs(ctx).edit().putBoolean(KEY_AUTO_UPGRADE, value).apply()

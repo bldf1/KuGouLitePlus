@@ -57,6 +57,32 @@ object NetCapture {
         BLOCK_AD_HOSTS.any { urlStr.contains(it, ignoreCase = true) }
 
     /**
+     * 「任务 / 赚钱推广」接口的**路径片段**（不含域名 —— 与广告拦截同一原则，
+     * 这些接口都在 `gateway.kugou.com` 主域下，写域名会毁掉全部功能）。
+     *
+     * 这些接口返回的数据会触发「金币飞入动画」「即将过期提醒」等一次性推广元素：
+     * 它们要么不在页面视图树里、要么是播完自动删除的动画 ⇒ 视图规则拦不住，
+     * 只能从数据源下手（让 app 认为"没有任务 / 没有到期提示"）。
+     */
+    private val BLOCK_PROMO_PATHS = arrayOf(
+        "lite_v_youth_task_center",   // 赚钱页 / 任务中心（金币任务）
+        "lite_v_vip_center",          // VIP 中心（到期/续费推广）
+        "get_vip_tips",               // VIP 到期提示（「即将过期」的直接来源）
+        "task_center/card_list",      // 任务中心卡片
+        "activity/task_list",         // 活动任务列表（v1/v2 同路径）
+    )
+
+    private var blockTaskPromo = true
+
+    /** 设置「屏蔽任务/赚钱推广」开关（面板/启动时同步） */
+    fun setBlockTaskPromo(value: Boolean) {
+        blockTaskPromo = value
+    }
+
+    private fun isBlockedPromo(urlStr: String): Boolean =
+        blockTaskPromo && BLOCK_PROMO_PATHS.any { urlStr.contains(it, ignoreCase = true) }
+
+    /**
      * 把请求改写到黑洞地址（通过 Builder 反射重建，兼容 okhttp3/4）
      */
     private fun rewriteToBlackhole(request: Any): Any? = try {
@@ -269,14 +295,18 @@ object NetCapture {
                     } catch (_: Throwable) {
                         null
                     }
-                    if (url == null || !isBlockedAdHost(url)) return@intercept chain.proceed()
+                    // R108：广告拦截之外，再按同一套"假成功空响应"链路拦掉任务/赚钱推广接口
+                    if (url == null || !(isBlockedAdHost(url) || isBlockedPromo(url))) {
+                        return@intercept chain.proceed()
+                    }
                     val resp = buildEmptyResponse(classLoader, request)
                     if (resp == null) return@intercept chain.proceed()
                     val fake = makeFakeCall(callCls, respCls, request, resp, timeoutObj)
                     if (fake == null) return@intercept chain.proceed()
                     if (adFakeCount < 10) {
                         adFakeCount++
-                        ModuleLog.log("广告空响应拦截(零闪现): ${url.take(90)}")
+                        val tag = if (isBlockedPromo(url) && !isBlockedAdHost(url)) "推广接口拦截" else "广告空响应拦截"
+                        ModuleLog.log("$tag(零闪现): ${url.take(90)}")
                     }
                     fake
                 }

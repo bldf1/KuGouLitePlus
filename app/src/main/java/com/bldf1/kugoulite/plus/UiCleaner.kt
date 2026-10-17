@@ -1259,8 +1259,8 @@ object UiCleaner {
                 .intercept { chain ->
                     val v = chain.thisObject as? View
                     val arg = chain.getArg(0) as? Int
-                        if (v != null && arg != null) {
-                            if (BADGE_DIAG) diagBadge(v, "setVis=$arg")
+                    if (v != null && arg != null) {
+                        if (BADGE_DIAG) diagBadge(v, "setVis=$arg")
                         val held = hiddenByUs[v]
                         if (held != null) {
                             if (arg != View.VISIBLE) {

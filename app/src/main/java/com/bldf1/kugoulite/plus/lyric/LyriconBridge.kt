@@ -149,7 +149,11 @@ internal object LyriconBridge {
                 playerPackageName = ctx.packageName,
                 logo = null,
                 metadata = null,
-                processName = Application.getProcessName(),
+                processName = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    Application.getProcessName()
+                } else {
+                    ctx.applicationInfo.processName ?: ""
+                },
             )
             // 断线重连后 CachedRemotePlayer 会自动把这些状态补发
             p.player.setDisplayTranslation(true)

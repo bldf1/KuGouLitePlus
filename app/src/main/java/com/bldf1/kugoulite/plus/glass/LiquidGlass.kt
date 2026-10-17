@@ -90,7 +90,13 @@ internal class LiquidGlass(
                 ),
                 Path.Direction.CW,
             )
-            outline.setPath(path)
+            // setPath 是 API 30+；8.1~10 用等价的 setConvexPath（对圆角矩形轮廓效果一致）
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                outline.setPath(path)
+            } else {
+                @Suppress("DEPRECATION")
+                outline.setConvexPath(path)
+            }
         }
     }
 
