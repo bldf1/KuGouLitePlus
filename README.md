@@ -96,6 +96,8 @@ MainHook.handleLoadPackage()
 
 ## 兼容性
 
+- **Android 8.1（API 27）及以上**；LSPosed / libxposed API 102（targetSdk 34）
+
 - 目标应用：酷狗概念版 v5.2.9（其他版本未经充分测试，规则 ID 可能失效）
 - 已在 HyperOS（Android 16）真机验证；不同分辨率/系统下区域门禁阈值可能需要微调
 
