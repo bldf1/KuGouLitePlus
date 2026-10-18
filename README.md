@@ -94,6 +94,21 @@ MainHook.handleLoadPackage()
 4. 强制停止并重新打开酷狗概念版
 5. 在酷狗概念版内**长按底栏**呼出设置面板，按需开启功能
 
+### 没有 root？用 LSPatch
+
+设备没有 root 时，可以用 [LSPatch](https://github.com/JingMatrix/LSPatch) 把模块挂到酷狗概念版上（免 root、免 Zygisk）：
+
+1. 安装 LSPatch 管理器（`manager.apk`）
+2. 在管理器里选择**酷狗概念版**作为目标应用，勾选本模块，生成补丁包并安装
+3. 用**打好的酷狗概念版**启动（不是原版），长按底栏呼出面板
+
+几点说明：
+
+- LSPatch 要求 **Android 9（API 28）及以上**（本模块本身支持 8.1，但这条路径从 9 起步）
+- 补丁过程会重打包并替换签名，LSPatch 自带签名绕过；若仍提示"签名异常"，请确认打补丁时签名绕过选项已开启
+- Manager 模式下，之后增删模块无需重新打补丁；Integrated 模式会把模块固化进 APK，体积更小但改动需重打
+- 与 root + LSPosed 相比，LSPatch 只影响被补丁的那一个应用，依赖系统级能力的开关会失效
+
 ## 兼容性
 
 - **Android 8.1（API 27）及以上**；LSPosed / libxposed API 102（targetSdk 34）
