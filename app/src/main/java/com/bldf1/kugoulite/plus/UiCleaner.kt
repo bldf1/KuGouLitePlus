@@ -250,12 +250,11 @@ object UiCleaner {
         // 「去播放页书签」这个开关**没有任何实现引用 = 死开关**，而书签的实际隐藏被
         // 「去播放页广告」顺带控制（用户点书签开关毫无反应）。现改回它自己的 key。
         Rule(Settings.KEY_UI_PLAY_BOOKMARK, "播放页书签",
-            // ⭐ R131：只隐藏书签本体 `elq`，**不再隐藏 `dt7`** ——
-            // `dt7` 是整个顶部容器（含歌曲标题区），隐藏它 + alphaShield 把 alpha 置 0
-            // 会干扰标题的淡入淡出，切歌时旧标题淡出被卡住 ⇒ 顶部留下一行半透明残影
-            // （用户录屏实锤；关掉这个开关残影就消失）。
+            // R139：dt7 改用 **INVISIBLE 占位**（见 scan 里的处理），不再用规则 GONE ——
+            // GONE 会让布局少一格，标题整体右移；INVISIBLE 保留占位，标题自然居中，
+            // 也不需要 translationX 补偿（那种补偿会压制切歌动画，之前踩过）。
             listOf(), listOf(), idNames = listOf("elq"), maxYRatio = 0.12f,
-            alphaShield = true),
+            alphaShield = false),
         // ⚠️ R79 同上：「去每周福利条」也是死开关，实际由「去播放页广告」控制。已改回自己的 key。
         Rule(Settings.KEY_UI_WEEKLY_WELFARE, "每周福利条",
             listOf(), listOf("每周福利"), hideParentLevels = 1),
@@ -535,6 +534,8 @@ object UiCleaner {
     private const val SKIP_TEXT = "跳过"
 
     fun install(xposed: XposedModule, classLoader: ClassLoader) {
+        installBookmarkMountHook(xposed)
+
         try {
             val onResume = Reflector.findMethod(Activity::class.java, "onResume")
             if (onResume == null) {
@@ -810,6 +811,67 @@ object UiCleaner {
     private var textHookInstalled = false
 
     /** Hook TextView.setText(CharSequence, BufferType)：文本写入瞬间按关键词判定并隐藏 */
+    /**
+     * R140：把「播放页书签容器 dt7」的隐藏**提前到挂载那一刻**。
+     *
+     * 原因：宿主布局先画一帧、我们的 scan / preDraw 才把 dt7 设成 INVISIBLE
+     * ⇒ 冷启动和切歌时会看到书签位闪一下。
+     * 做法：hook ViewGroup.addView(View, int, LayoutParams)（其余重载最终都走这里），
+     * 见到刚挂上的 dt7 且开关开启就立刻置 INVISIBLE。
+     */
+    private fun installBookmarkMountHook(xposed: XposedModule) {
+        // ⚠️ 只对**原本 VISIBLE** 的 dt7 设 INVISIBLE：
+        // 发现页的 dt7 宿主本来就设成 GONE（不占位），我们若改成 INVISIBLE 反而让它占位，
+        // 把发现页顶栏的图标整体挤动（用户实锤"冷启动顶栏图标会移动"）。
+        val apply: (android.view.View?) -> Unit = { child ->
+            try {
+                if (child != null && child.id != android.view.View.NO_ID &&
+                    child.visibility == android.view.View.VISIBLE &&
+                    Settings.isFeature(child.context, Settings.KEY_UI_PLAY_BOOKMARK) &&
+                    child.resources.getResourceEntryName(child.id) == "dt7"
+                ) {
+                    child.visibility = android.view.View.INVISIBLE
+                }
+            } catch (_: Throwable) {
+            }
+        }
+        var ok = 0
+        try {
+            val m = android.view.ViewGroup::class.java.getDeclaredMethod(
+                "addView",
+                android.view.View::class.java,
+                Int::class.javaPrimitiveType,
+                android.view.ViewGroup.LayoutParams::class.java
+            )
+            xposed.hook(m).intercept { chain ->
+                chain.proceed()
+                apply(chain.args.getOrNull(0) as? android.view.View)
+            }
+            ok++
+        } catch (_: Throwable) {
+        }
+        // 进播放页时宿主用 addViewInLayout 挂载（不走 addView 重载）⇒ 单独 hook
+        try {
+            val m2 = android.view.ViewGroup::class.java.getDeclaredMethod(
+                "addViewInLayout",
+                android.view.View::class.java,
+                Int::class.javaPrimitiveType,
+                android.view.ViewGroup.LayoutParams::class.java,
+                Boolean::class.javaPrimitiveType
+            )
+            xposed.hook(m2).intercept { chain ->
+                // ⚠️ addViewInLayout 返回 boolean（不是 void）：必须把原返回值透传，
+                // 否则框架强转 Boolean 时抛 ClassCastException 直接崩溃（真机实锤）。
+                val ret = chain.proceed()
+                apply(chain.args.getOrNull(0) as? android.view.View)
+                ret
+            }
+            ok++
+        } catch (_: Throwable) {
+        }
+        ModuleLog.log("书签容器挂载 Hook: 成功 $ok 个")
+    }
+
     private fun installTextHook(xposed: XposedModule) {
         if (textHookInstalled) return
         textHookInstalled = true
@@ -1150,6 +1212,30 @@ object UiCleaner {
         val className = view.javaClass.name
         val rn = if (view.id != View.NO_ID) resourceName(view) else null
         val text = if (view is TextView) extractText(view) else null
+        // ⭐ R139：播放页书签容器 dt7 用 INVISIBLE 隐藏 —— 占位保留，标题栏两侧保持对称，
+        // 标题自然居中（用 GONE 会少一格，标题右移；用 translationX 补偿会压制切歌动画）。
+        if (rn == "dt7" && Settings.isFeature(view.context, Settings.KEY_UI_PLAY_BOOKMARK)) {
+            if (view.visibility != View.INVISIBLE) view.visibility = View.INVISIBLE
+            // 切歌时宿主会重建 dt7（新实例），scan 遍历到之前会闪 1~2 帧 ⇒ 挂 preDraw，
+            // 一旦创建出来就每帧钉住 INVISIBLE（只改 visibility，不影响动画）。
+            if (headerFixers[view] != true) {
+                headerFixers[view] = true
+                try {
+                    view.viewTreeObserver.addOnPreDrawListener(
+                        object : android.view.ViewTreeObserver.OnPreDrawListener {
+                            override fun onPreDraw(): Boolean {
+                                try {
+                                    if (view.visibility != View.INVISIBLE) view.visibility = View.INVISIBLE
+                                } catch (_: Throwable) {
+                                }
+                                return true
+                            }
+                        }
+                    )
+                } catch (_: Throwable) {
+                }
+            }
+        }
         var stop = false
 
         // ① 类名关键词规则（按 Class 记忆化）
@@ -3478,6 +3564,31 @@ object UiCleaner {
      * 资源 ID 在进程内恒定，故用 SparseArray（无装箱）做 int→String 记忆化。
      */
     private val idNameCache = android.util.SparseArray<String>(64)
+
+    /**
+     * R137：判断这个节点是否位于**播放页顶栏**。
+     * 不能用 hasAncestorId("dt7") —— 真机实测 dt7 不是 dln 的祖先，而是 dlw 的**兄弟**
+     * （同属一个父容器）。所以改为：向上若干层，检查每一层的**兄弟节点**里有没有 dt7。
+     * dt7 只在播放页出现（发现页没有），这是当前唯一可靠的播放页判据。
+     */
+    private fun isPlayerHeader(v: View): Boolean {
+        var p: android.view.ViewParent? = v.parent
+        var d = 0
+        while (p is View && d++ < 12) {
+            val parent = p.parent as? android.view.ViewGroup
+            if (parent != null) {
+                for (i in 0 until parent.childCount) {
+                    val c = parent.getChildAt(i) ?: continue
+                    if (c !== p && c.id != View.NO_ID && resourceName(c) == "dt7") return true
+                }
+            }
+            p = p.parent
+        }
+        return false
+    }
+
+    /** 已被 preDraw 钉住的书签容器（R139b） */
+    private val headerFixers = java.util.WeakHashMap<View, Boolean>()
 
     private fun resourceName(view: View): String? {
         val id = view.id
