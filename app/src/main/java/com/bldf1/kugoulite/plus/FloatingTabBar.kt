@@ -1037,6 +1037,9 @@ internal object FloatingTabBar {
     private var detachedWheel: View? = null
     /** 上一次判定过的栈顶容器（只在它变化时才重新遍历容器内容，避免每帧开销） */
     private var lastTopRef: java.lang.ref.WeakReference<View>? = null
+
+    /** 是否在「搜索流程」中：进搜索页置 true、回主页置 false（R117） */
+    private var inSearchFlow = false
     private var wheelOrigParent: java.lang.ref.WeakReference<ViewGroup>? = null
     private var wheelOrigLp: ViewGroup.LayoutParams? = null
 
@@ -1073,6 +1076,9 @@ internal object FloatingTabBar {
 
         val wheel = try { findBarChild(bar, decor, act, "fkb") } catch (_: Throwable) { null }
             ?: return false
+        // ⭐ R117：转盘显隐**由宿主决定** —— 宿主没设 VISIBLE（如某些页面设 GONE）就不摘
+        if (wheel.visibility != View.VISIBLE) return false
+        val hostVis = wheel.visibility
         return try {
             val locW = IntArray(2)
             val locD = IntArray(2)
@@ -1089,7 +1095,8 @@ internal object FloatingTabBar {
             lp.leftMargin = locW[0] - locD[0]
             lp.topMargin = locW[1] - locD[1]
             dv.addView(wheel, lp)
-            wheel.visibility = View.VISIBLE
+            // 恢复宿主给的状态，不强制 VISIBLE（R117：显隐由宿主决定）
+            wheel.visibility = hostVis
             detachedWheel = wheel
             log(always = true) { "搜索页：转盘已摘到 DecorView" }
             true
@@ -1141,19 +1148,42 @@ internal object FloatingTabBar {
         // 转盘还挂在那儿收不回来（用户实锤：从搜索页点歌进播放页，底部仍有小圆）。
         // 现在每帧都按**栈顶容器**校正；只有栈顶变了才重新遍历容器内容（省开销）。
         if (!cover) {
+            inSearchFlow = false
             if (detachedWheel != null) reattachWheel(snap)
             lastTopRef = null
             return
         }
         val top = topPushContainer(stack)
         if (top === lastTopRef?.get()) return
-        lastTopRef = top?.let { java.lang.ref.WeakReference(it) }
-        // 双重判据：容器类名要对（排除播放页 Player3），容器内还要真有搜索框
-        // （频道页/歌单详情等也用 FragmentViewNormalAnimationFirst，只按类名会误判）
         val topName = top?.javaClass?.simpleName ?: "?"
-        val isSearch = topName == SEARCH_CONTAINER && containsSearchBox(top!!)
-        if (isSearch) detachWheel(snap) else reattachWheel(snap)
-        log(always = true) { "栈顶变化: top=$topName isSearch=$isSearch" }
+        val wr = top?.let { java.lang.ref.WeakReference(it) }
+        // 进搜索页（容器内有搜索框）→ 打开「搜索流程」
+        if (top != null && topName == SEARCH_CONTAINER && containsSearchBox(top)) {
+            inSearchFlow = true
+        }
+        // ⭐ R117：三态
+        //   ① 播放页 → 收回（播放页有自己的大唱片）
+        //   ② 搜索流程内（搜索页 + 新歌速递/排行榜/子页面，含从播放页返回）→ 确保在顶层
+        //   ③ 其它 → 保持
+        when {
+            topName == "FragmentViewPlayer3" -> {
+                if (detachedWheel != null) reattachWheel(snap)
+                lastTopRef = wr
+                log(always = true) { "栈顶=播放页 → 收回转盘" }
+            }
+            inSearchFlow -> {
+                if (detachedWheel == null) {
+                    if (detachWheel(snap)) lastTopRef = wr
+                } else {
+                    lastTopRef = wr
+                }
+                log(always = true) { "栈顶=$topName（搜索流程内）→ 转盘在顶层" }
+            }
+            else -> {
+                lastTopRef = wr
+                log(always = true) { "栈顶=$topName → 保持" }
+            }
+        }
     }
 
     /** FragmentStackView 的宿主资源 ID 名（真机 dump 实锤：app:id/ajd） */
