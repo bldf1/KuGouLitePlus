@@ -796,12 +796,26 @@ internal object FloatingTabBar {
             if (DIAG_BAR_FILL && snap.applyCount == 0) diagBarFill(bar)
 
             // ---- ① 本体：收窄 + 圆角 + 阴影（只改 LayoutParams / outline，不碰 background）----
+            // ⭐ R124：完全回到 v1.0 的写法 —— 固定用 FrameLayout.LayoutParams。
+            // 之前改成“按原类型克隆”会拿到 ConstraintLayout.LayoutParams，它的垂直约束
+            // 会接管高度和位置 ⇒ 胶囊变矮/变低（用户拿 1.0 对比实锤）。
+            // v1.0 用 FrameLayout.LayoutParams 在那个用户的机型上也是正常的（他只报了“跑上面”），
+            // 说明真正的差异只在 gravity，LayoutParams 类型不必动。
+            val parentH = (bar.parent as? View)?.height ?: 0
             val fresh = FrameLayout.LayoutParams(snap.barLp ?: lp)
-            fresh.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            if (parentH in 200..400) {
+                // 父容器就是底栏本体：v1.0 原样（TOP + 固定 TOP_MARGIN_DP）
+                fresh.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                fresh.topMargin = top
+                fresh.bottomMargin = 0
+            } else {
+                // 父容器是全屏容器：TOP 会把胶囊顶到屏幕最上面（用户反馈），改用 BOTTOM 贴底
+                fresh.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                fresh.bottomMargin = (10 * density).toInt()
+                fresh.topMargin = 0
+            }
             fresh.leftMargin = side
             fresh.rightMargin = side
-            fresh.topMargin = top
-            fresh.bottomMargin = 0
             fresh.height = height
             bar.layoutParams = fresh
 
@@ -1131,6 +1145,25 @@ internal object FloatingTabBar {
      * 用 INVISIBLE 而非 GONE：整棵子树不绘制（含 elevation 阴影），但保留布局，
      * 恢复时零 relayout 抖动；也不会干扰 geometryBrokenFast 的高度校验。
      */
+    /** 🔬 临时诊断（R118）：打印容器内所有带 id 的节点，用来区分「歌手/歌单」与「新歌速递/排行榜」 */
+    private fun dumpTopIds(root: View) {
+        val sb = StringBuilder()
+        val q = ArrayDeque<View>()
+        q.add(root)
+        var guard = 0
+        var n = 0
+        while (q.isNotEmpty() && guard++ < 2000 && n < 40) {
+            val v = q.removeFirst()
+            val id = resourceName(v)
+            if (id != null) {
+                sb.append(id).append('/').append(v.javaClass.simpleName).append(' ')
+                n++
+            }
+            if (v is ViewGroup) for (i in 0 until v.childCount) q.add(v.getChildAt(i))
+        }
+        log(always = true) { "容器ids: $sb" }
+    }
+
     private fun updateOverlayHidden(snap: Snapshot) {
         val bar = snap.bar ?: return
         val stack = findFragmentStack(snap) ?: return
@@ -1157,31 +1190,23 @@ internal object FloatingTabBar {
         if (top === lastTopRef?.get()) return
         val topName = top?.javaClass?.simpleName ?: "?"
         val wr = top?.let { java.lang.ref.WeakReference(it) }
-        // 进搜索页（容器内有搜索框）→ 打开「搜索流程」
-        if (top != null && topName == SEARCH_CONTAINER && containsSearchBox(top)) {
-            inSearchFlow = true
-        }
-        // ⭐ R117：三态
-        //   ① 播放页 → 收回（播放页有自己的大唱片）
-        //   ② 搜索流程内（搜索页 + 新歌速递/排行榜/子页面，含从播放页返回）→ 确保在顶层
-        //   ③ 其它 → 保持
+        // ⭐ R119：范围放宽 —— **任何二级页都显示转盘**（不只是搜索流程内），
+        // 因为原生下从发现页进入的二级歌曲列表页面同样带那颗圆形封面。
+        // 只有播放页例外（它有自己的大唱片）。
         when {
             topName == "FragmentViewPlayer3" -> {
                 if (detachedWheel != null) reattachWheel(snap)
                 lastTopRef = wr
                 log(always = true) { "栈顶=播放页 → 收回转盘" }
             }
-            inSearchFlow -> {
+            else -> {
                 if (detachedWheel == null) {
                     if (detachWheel(snap)) lastTopRef = wr
                 } else {
                     lastTopRef = wr
                 }
-                log(always = true) { "栈顶=$topName（搜索流程内）→ 转盘在顶层" }
-            }
-            else -> {
-                lastTopRef = wr
-                log(always = true) { "栈顶=$topName → 保持" }
+                if (top != null) dumpTopIds(top)
+                log(always = true) { "栈顶=$topName → 转盘在顶层" }
             }
         }
     }
