@@ -1054,6 +1054,7 @@ internal object FloatingTabBar {
 
     /** 是否在「搜索流程」中：进搜索页置 true、回主页置 false（R117） */
     private var inSearchFlow = false
+
     private var wheelOrigParent: java.lang.ref.WeakReference<ViewGroup>? = null
     private var wheelOrigLp: ViewGroup.LayoutParams? = null
 
@@ -1145,25 +1146,6 @@ internal object FloatingTabBar {
      * 用 INVISIBLE 而非 GONE：整棵子树不绘制（含 elevation 阴影），但保留布局，
      * 恢复时零 relayout 抖动；也不会干扰 geometryBrokenFast 的高度校验。
      */
-    /** 🔬 临时诊断（R118）：打印容器内所有带 id 的节点，用来区分「歌手/歌单」与「新歌速递/排行榜」 */
-    private fun dumpTopIds(root: View) {
-        val sb = StringBuilder()
-        val q = ArrayDeque<View>()
-        q.add(root)
-        var guard = 0
-        var n = 0
-        while (q.isNotEmpty() && guard++ < 2000 && n < 40) {
-            val v = q.removeFirst()
-            val id = resourceName(v)
-            if (id != null) {
-                sb.append(id).append('/').append(v.javaClass.simpleName).append(' ')
-                n++
-            }
-            if (v is ViewGroup) for (i in 0 until v.childCount) q.add(v.getChildAt(i))
-        }
-        log(always = true) { "容器ids: $sb" }
-    }
-
     private fun updateOverlayHidden(snap: Snapshot) {
         val bar = snap.bar ?: return
         val stack = findFragmentStack(snap) ?: return
@@ -1205,7 +1187,6 @@ internal object FloatingTabBar {
                 } else {
                     lastTopRef = wr
                 }
-                if (top != null) dumpTopIds(top)
                 log(always = true) { "栈顶=$topName → 转盘在顶层" }
             }
         }

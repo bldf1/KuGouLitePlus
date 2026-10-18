@@ -1142,11 +1142,15 @@ object UiCleaner {
      *   ③ 文本规则 —— 仅 TextView + mayBePromo 预筛后线性匹配。
      * 单个节点通常只有 0~2 条候选，判定成本下降一个数量级，语义与原先完全一致。
      */
+
     private fun scan(view: View?, activity: Activity, hidden: IntArray, depth: Int) {
         if (view == null || hidden[0] > 200 || depth > MAX_DEPTH) return
         val className = view.javaClass.name
         val rn = if (view.id != View.NO_ID) resourceName(view) else null
         val text = if (view is TextView) extractText(view) else null
+        // ⭐ R126：标题居中补偿 —— 右上角「频道发布」按钮被隐藏后，标题容器（dsi）
+        // 和右侧耳机图标会一起右移。这里只对**标题容器本身**做水平平移，把它拉回屏幕正中，
+        // 不改它的布局、不碰任何兄弟节点（用户明确要求：只居中标题，别动其他地方）。
         var stop = false
 
         // ① 类名关键词规则（按 Class 记忆化）
