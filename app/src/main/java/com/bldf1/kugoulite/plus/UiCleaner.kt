@@ -250,9 +250,11 @@ object UiCleaner {
         // 「去播放页书签」这个开关**没有任何实现引用 = 死开关**，而书签的实际隐藏被
         // 「去播放页广告」顺带控制（用户点书签开关毫无反应）。现改回它自己的 key。
         Rule(Settings.KEY_UI_PLAY_BOOKMARK, "播放页书签",
-            listOf(), listOf(), idNames = listOf("dt7", "elq"), maxYRatio = 0.12f,
-            // ⭐ R85b：宿主在预隐藏成功约 343ms 后会把该视图**复活并画出来**（真机实锤），
-            // 绘制前兜底因同帧时序漏一帧 ⇒ 开「alpha 保险」（只影响本规则）。
+            // ⭐ R131：只隐藏书签本体 `elq`，**不再隐藏 `dt7`** ——
+            // `dt7` 是整个顶部容器（含歌曲标题区），隐藏它 + alphaShield 把 alpha 置 0
+            // 会干扰标题的淡入淡出，切歌时旧标题淡出被卡住 ⇒ 顶部留下一行半透明残影
+            // （用户录屏实锤；关掉这个开关残影就消失）。
+            listOf(), listOf(), idNames = listOf("elq"), maxYRatio = 0.12f,
             alphaShield = true),
         // ⚠️ R79 同上：「去每周福利条」也是死开关，实际由「去播放页广告」控制。已改回自己的 key。
         Rule(Settings.KEY_UI_WEEKLY_WELFARE, "每周福利条",
@@ -1148,9 +1150,6 @@ object UiCleaner {
         val className = view.javaClass.name
         val rn = if (view.id != View.NO_ID) resourceName(view) else null
         val text = if (view is TextView) extractText(view) else null
-        // ⭐ R126：标题居中补偿 —— 右上角「频道发布」按钮被隐藏后，标题容器（dsi）
-        // 和右侧耳机图标会一起右移。这里只对**标题容器本身**做水平平移，把它拉回屏幕正中，
-        // 不改它的布局、不碰任何兄弟节点（用户明确要求：只居中标题，别动其他地方）。
         var stop = false
 
         // ① 类名关键词规则（按 Class 记忆化）
