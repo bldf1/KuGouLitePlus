@@ -80,6 +80,9 @@ class MainHook : XposedModule() {
         // 拦截发现页顶栏"下拉进入频道"手势（配合去频道开关）
         ChannelGestureBlocker.install(this, classLoader)
 
+        // 频道页「发帖引导条」源头拦截（「开启美好的一天」+ 去发布，5 秒后自行滑出）
+        ChannelPostGuideBlocker.install(this, classLoader)
+
         // 词幕(Lyricon)歌词提供器 —— 只在 .support 进程真正安装（MediaSession 在那边）
         LyriconBridge.install(this, classLoader, processName)
 

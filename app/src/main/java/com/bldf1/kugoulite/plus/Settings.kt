@@ -39,6 +39,8 @@ object Settings {
     const val KEY_UI_PLAY_DISCIPLINE = "ui_play_discipline"
     const val KEY_UI_SEARCH_AD = "ui_search_ad"
     const val KEY_UI_SEARCH_BANNER = "ui_search_banner"
+    /** 搜索页默认页下方的频道推荐区（推荐/周榜/次元… + 卡片列表） */
+    const val KEY_UI_SEARCH_CHANNEL = "ui_search_channel"
     const val KEY_UI_SEARCH_CLOSE = "ui_search_close"
     const val KEY_UI_SEARCH_INDICATOR = "ui_search_indicator"
     const val KEY_UI_SEARCH_VIP_BAR = "ui_search_vip_bar"
@@ -63,6 +65,12 @@ object Settings {
     const val KEY_UI_MINE_BADGE = "ui_mine_badge"
     const val KEY_UI_TAB_BADGE = "ui_tab_badge"
     const val KEY_UI_CHANNEL = "ui_channel"
+    /**
+     * 频道页「发帖引导条」：ChannelPostGuideNotice（一句话文案 + 「去发布」，
+     * 出现后倒计时 5 秒自行滑出）。文案取本地 dayTexts/nightTexts 数组，
+     * 不来自网络 ⇒ 只能从创建点拦截（见 ChannelPostGuideBlocker）。
+     */
+    const val KEY_UI_CHANNEL_POST_GUIDE = "ui_channel_post_guide"
     /** 悬浮底栏：把宿主底栏收窄圆角成贴底胶囊（Round 24） */
     const val KEY_UI_FLOATING_BAR = "ui_floating_bar"
     /** 胶囊填充层改用液态玻璃材质（Round 28，API 33+；关掉则胶囊不含填充层） */

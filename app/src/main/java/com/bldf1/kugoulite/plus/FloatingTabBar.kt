@@ -805,6 +805,11 @@ internal object FloatingTabBar {
             fresh.height = height
             bar.layoutParams = fresh
 
+            // R92：胶囊区域消费触摸，阻止事件穿透到底下的 feed/卡片
+            // （用户反馈"点击悬浮底栏经常触发其他操作"）。只置 clickable：
+            // tab 按钮和中间圆形封面照常响应，落在胶囊上的其余点击被吞掉。
+            if (!bar.isClickable) bar.isClickable = true
+
             bar.outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
                     outline.setRoundRect(0, 0, view.width, view.height, radius)
@@ -1016,6 +1021,104 @@ internal object FloatingTabBar {
         return visibleFrag > 0
     }
 
+    // ===== R99：搜索页只保留中间圆形封面（转盘）=====
+    //
+    // 判据终于确定了：**栈顶 push 容器的类名**。
+    // 进程内遍历实测（adb 的 dumpsys/uiautomator 都拿不到，因为有唱片动画）：
+    //   搜索页 → com.kugou.common.base.uiframe.FragmentViewNormalAnimationFirst
+    //   播放页 → com.kugou.common.base.uiframe.FragmentViewPlayer3   （1220x2712 全屏）
+    // 之前四种判据（容器内 EditText / 可见 Fragment 名 / 大图）都失败，
+    // 根因是播放页**叠加**在搜索页之上、搜索页的一切都还活着；只有容器类名是分得开的。
+    //
+    // 做法：整条胶囊 INVISIBLE + 把转盘 fkb 摘到 DecorView ⇒ 屏幕上只剩圆形封面。
+    // 播放页（Player3）不摘，保持整条隐藏。
+    private const val SEARCH_CONTAINER = "FragmentViewNormalAnimationFirst"
+
+    private var detachedWheel: View? = null
+    /** 上一次判定过的栈顶容器（只在它变化时才重新遍历容器内容，避免每帧开销） */
+    private var lastTopRef: java.lang.ref.WeakReference<View>? = null
+    private var wheelOrigParent: java.lang.ref.WeakReference<ViewGroup>? = null
+    private var wheelOrigLp: ViewGroup.LayoutParams? = null
+
+    /** 栈顶的 push 页容器：取**最后一个**可见的（搜索页在播放页之下时仍 VISIBLE） */
+    private fun topPushContainer(stack: ViewGroup): View? {
+        var last: View? = null
+        for (i in 0 until stack.childCount) {
+            val c = stack.getChildAt(i)
+            if (c.visibility != View.VISIBLE) continue
+            if (branchKind(c) == 1) last = c
+        }
+        return last
+    }
+
+    /** 容器里是否有可见的搜索输入框。频道页/歌单详情等也用同一个容器类，必须再确认内容 */
+    private fun containsSearchBox(root: View): Boolean {
+        val q = ArrayDeque<View>()
+        q.add(root)
+        var guard = 0
+        while (q.isNotEmpty() && guard++ < 1500) {
+            val v = q.removeFirst()
+            if (v is android.widget.EditText && v.isShown && v.width > 0 && v.height > 0) return true
+            if (v is ViewGroup) for (i in 0 until v.childCount) q.add(v.getChildAt(i))
+        }
+        return false
+    }
+
+    private fun detachWheel(snap: Snapshot): Boolean {
+        val bar = snap.bar ?: return false
+        val decor = snap.decorRef?.get() ?: return false
+        val act = snap.activityRef?.get() ?: return false
+        val dv = decor as? ViewGroup ?: return false
+        detachedWheel?.let { if (it.parent === dv) return true }
+
+        val wheel = try { findBarChild(bar, decor, act, "fkb") } catch (_: Throwable) { null }
+            ?: return false
+        return try {
+            val locW = IntArray(2)
+            val locD = IntArray(2)
+            wheel.getLocationOnScreen(locW)
+            decor.getLocationOnScreen(locD)
+            detachedWheel?.let { old -> (old.parent as? ViewGroup)?.removeView(old) }
+            wheelOrigParent = (wheel.parent as? ViewGroup)?.let { java.lang.ref.WeakReference(it) }
+            wheelOrigLp = wheel.layoutParams
+            (wheel.parent as? ViewGroup)?.removeView(wheel)
+            val lp = FrameLayout.LayoutParams(
+                wheelOrigLp?.width ?: ViewGroup.LayoutParams.WRAP_CONTENT,
+                wheelOrigLp?.height ?: ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.leftMargin = locW[0] - locD[0]
+            lp.topMargin = locW[1] - locD[1]
+            dv.addView(wheel, lp)
+            wheel.visibility = View.VISIBLE
+            detachedWheel = wheel
+            log(always = true) { "搜索页：转盘已摘到 DecorView" }
+            true
+        } catch (t: Throwable) {
+            log(always = true) { "搜索页：转盘摘取失败 $t" }
+            false
+        }
+    }
+
+    private fun reattachWheel(snap: Snapshot) {
+        val w = detachedWheel ?: return
+        detachedWheel = null
+        try {
+            (w.parent as? ViewGroup)?.removeView(w)
+            val lp = wheelOrigLp
+            val op = wheelOrigParent?.get()
+            if (op != null && lp != null) {
+                op.addView(w, lp)
+            } else {
+                val bar = snap.bar as? ViewGroup
+                if (bar != null && lp != null) bar.addView(w, lp)
+            }
+        } catch (t: Throwable) {
+            log(always = true) { "转盘装回失败 $t" }
+        }
+        wheelOrigParent = null
+        wheelOrigLp = null
+    }
+
     /**
      * 按当前 push 页状态切换胶囊可见性（每帧 preDraw / 4s 轮询各调一次）。
      * 用 INVISIBLE 而非 GONE：整棵子树不绘制（含 elevation 阴影），但保留布局，
@@ -1025,10 +1128,32 @@ internal object FloatingTabBar {
         val bar = snap.bar ?: return
         val stack = findFragmentStack(snap) ?: return
         val cover = overlayCovering(stack)
-        if (cover == overlayHidden) return
-        overlayHidden = cover
-        bar.visibility = if (cover) View.INVISIBLE else View.VISIBLE
-        log { if (cover) "二级页面盖顶，隐藏悬浮胶囊" else "回到主页，恢复悬浮胶囊" }
+        if (cover != overlayHidden) {
+            overlayHidden = cover
+            bar.visibility = if (cover) View.INVISIBLE else View.VISIBLE
+            log(always = true) {
+                if (cover) "二级页盖顶：隐藏胶囊" else "回到主页：恢复胶囊"
+            }
+        }
+
+        // ⭐ R101：**cover 没变也可能换了页面**（搜索页 → 播放页，两者都 cover=true），
+        // 原来在这里 `if (cover == overlayHidden) return` 直接跳过 ⇒ 进播放页后
+        // 转盘还挂在那儿收不回来（用户实锤：从搜索页点歌进播放页，底部仍有小圆）。
+        // 现在每帧都按**栈顶容器**校正；只有栈顶变了才重新遍历容器内容（省开销）。
+        if (!cover) {
+            if (detachedWheel != null) reattachWheel(snap)
+            lastTopRef = null
+            return
+        }
+        val top = topPushContainer(stack)
+        if (top === lastTopRef?.get()) return
+        lastTopRef = top?.let { java.lang.ref.WeakReference(it) }
+        // 双重判据：容器类名要对（排除播放页 Player3），容器内还要真有搜索框
+        // （频道页/歌单详情等也用 FragmentViewNormalAnimationFirst，只按类名会误判）
+        val topName = top?.javaClass?.simpleName ?: "?"
+        val isSearch = topName == SEARCH_CONTAINER && containsSearchBox(top!!)
+        if (isSearch) detachWheel(snap) else reattachWheel(snap)
+        log(always = true) { "栈顶变化: top=$topName isSearch=$isSearch" }
     }
 
     /** FragmentStackView 的宿主资源 ID 名（真机 dump 实锤：app:id/ajd） */

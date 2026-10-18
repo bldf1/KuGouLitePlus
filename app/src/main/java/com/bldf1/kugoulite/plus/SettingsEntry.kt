@@ -600,9 +600,14 @@ object SettingsEntry {
                     row(Settings.KEY_UI_PLAY_BOOKMARK, "去播放页书签", "隐藏播放页顶部的书签栏"),
                     row(Settings.KEY_UI_WEEKLY_WELFARE, "去每周福利条", "隐藏播放页的「每周福利」条"),
                     row(Settings.KEY_UI_PLAY_PUBLISH_TIP, "去发布提示", "隐藏「使用此音乐发布」提示"),
+                    row(
+                        Settings.KEY_UI_CHANNEL_POST_GUIDE, "去频道发帖引导条",
+                        "拦在源头不创建：频道页的「开启美好的一天 / 去发布」横幅（出现 5 秒后自行滑出）"
+                    ),
                     row(Settings.KEY_UI_PLAY_DISCIPLINE, "去咱一起自律入口", "隐藏播放页歌词下方的「咱一起自律」频道胶囊"),
                     row(Settings.KEY_UI_SEARCH_AD, "去搜索推广", "隐藏搜索结果里的广告推广条"),
                     row(Settings.KEY_UI_SEARCH_BANNER, "去搜索推广Banner", "隐藏搜索页的推广 Banner"),
+                    row(Settings.KEY_UI_SEARCH_CHANNEL, "去搜索页频道推荐", "隐藏搜索页下方的频道推荐区（推荐/周榜/次元… 及卡片列表）"),
                     row(Settings.KEY_UI_SEARCH_CLOSE, "去搜索推广关闭钮", "隐藏搜索推广自带的关闭按钮"),
                     row(Settings.KEY_UI_SEARCH_INDICATOR, "去搜索推广指示器", "隐藏搜索推广的轮播指示圆点"),
                     row(Settings.KEY_UI_SEARCH_VIP_BAR, "去搜索结果VIP条", "隐藏搜索结果上方的 VIP 条"),

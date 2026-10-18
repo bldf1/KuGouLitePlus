@@ -277,6 +277,16 @@ object UiCleaner {
         Rule(Settings.KEY_UI_SEARCH_BANNER, "搜索推广Banner",
             listOf(), listOf(), idNames = listOf("gu6"),
             minYRatio = 0.20f, hideParentLevels = 2),
+        // ⭐ R100：搜索页默认页下方的**频道推荐区**（推荐/周榜/次元/AI… tab + 卡片列表）。
+        // 祖先链真机实锤（模块内遍历，adb 的 uiautomator/dumpsys 都被该页动画挡住）：
+        //   KGUIFrameLayout/gu7 < FrameLayout < ViewPager/**gue** < FrameLayout/**gub**
+        //     < LinearLayout < TouchScrollView/**e1k** < RelativeLayout/gtz
+        // `gub` 包住整个频道区（tab 栏 + 内容页），`gue` 是频道 tab 的 pager。
+        // 用 ancestorIdNames=["e1k"] 限定**只在搜索页**生效 —— gub/gue 是短混淆 id，
+        // 别处可能有同名节点（铁律：同类同 id 跨页复用是最大误伤源）。
+        Rule(Settings.KEY_UI_SEARCH_CHANNEL, "搜索页频道推荐",
+            listOf(), listOf(), idNames = listOf("gub", "gue"),
+            ancestorIdNames = listOf("e1k")),
         Rule(Settings.KEY_UI_MEMBER_BAR, "会员栏",
             listOf("VipBar", "MemberBar", "VipBanner"), listOf("开通会员", "开通概念版", "即将过期", "自动续费")),
         Rule(Settings.KEY_UI_MEMBER_WIDGET, "会员控件",
@@ -359,8 +369,15 @@ object UiCleaner {
         Rule(Settings.KEY_UI_MINE_BADGE, "我的页顶栏红点",
             listOf(), listOf(), idNames = listOf("c6_", "ip9", "f5k"),
             ancestorIdNames = listOf("apg")),
+        // ⚠️ R87：底栏有**两套**角标容器（都在 kg 导航栏布局 res/z/ae5.xml，
+        // 5 个 id 均只此一处使用、零复用）：
+        //   at6 = 红点/数字角标（at8 红点图 + at5 数字）
+        //   at7 = **文字标签角标**（at4 带红底 drawable + padding 3dp）← 「即将过期」
+        // 原先只列 at6 ⇒ 「即将过期」这类文字标签整块裸露（用户实锤：
+        // 胶囊右上角红色「即将过期」，07:49 首启截图 g10 实证）。
+        // at7 在 XML 里默认 GONE、由代码决定 visible，只在"要弹推广角标"时才出现。
         Rule(Settings.KEY_UI_TAB_BADGE, "TAB角标",
-            listOf(), listOf(), idNames = listOf("at6"), minYRatio = 0.85f),
+            listOf(), listOf(), idNames = listOf("at6", "at7"), minYRatio = 0.85f),
         Rule(Settings.KEY_UI_SEARCH_CLOSE, "搜索推广关闭钮",
             listOf(), listOf(), idNames = listOf("gu3"), minYRatio = 0.15f,
             hideParentLevels = 1),
@@ -840,20 +857,26 @@ object UiCleaner {
         val isOwn = isOwnPanel(v)
 
         // 4. TAB角标
-        if (Settings.isFeature(v.context, Settings.KEY_UI_TAB_BADGE) && !isOwn && resourceName(v) == "at5") {
-            val parent = v.parent as? View
-            if (parent != null && resourceName(parent) == "at6") {
-                if (parent.visibility != View.GONE) {
-                    parent.visibility = View.GONE
-                    hiddenByUs[parent] = tabBadgeRule
-                    ModuleLog.log("UI净化[TAB角标] 隐藏父容器(at6)")
+        // R87：at5（数字）与 at4（文字标签，带红底）都可能承载推广角标，
+        // 父容器可能是 at6（红点）或 at7（文字标签）—— 两者都整体 GONE。
+        if (Settings.isFeature(v.context, Settings.KEY_UI_TAB_BADGE) && !isOwn) {
+            val rn = resourceName(v)
+            if (rn == "at5" || rn == "at4") {
+                val parent = v.parent as? View
+                val pn = parent?.let { resourceName(it) }
+                if (parent != null && (pn == "at6" || pn == "at7")) {
+                    if (parent.visibility != View.GONE) {
+                        parent.visibility = View.GONE
+                        hiddenByUs[parent] = tabBadgeRule
+                        ModuleLog.log("UI净化[TAB角标] 隐藏父容器($pn)")
+                    }
+                } else if (v.visibility != View.GONE) {
+                    v.visibility = View.GONE
+                    hiddenByUs[v] = tabBadgeRule
+                    ModuleLog.log("UI净化[TAB角标] 隐藏角标自身($rn)")
                 }
-            } else if (v.visibility != View.GONE) {
-                v.visibility = View.GONE
-                hiddenByUs[v] = tabBadgeRule
-                ModuleLog.log("UI净化[TAB角标] 隐藏角标自身")
+                return
             }
-            return
         }
 
         // 5. 概念实验室
@@ -2326,6 +2349,8 @@ object UiCleaner {
             }
             ModuleLog.log("免费听推广页翻页拦截: 已 hook ${pageMethods.size} 个翻页方法")
 
+
+
             // 2. 定位 C(I)：非 void 非 primitive 返回、单 int 参——infoForPosition
             try {
                 var cMethod: Method? = null
@@ -2429,6 +2454,17 @@ object UiCleaner {
      * （scrollX % width == 0）时，改写参数钉住页 0 并隐藏推广页内容。
      * arg0!=1 时放行（发现页正常翻页），仅按 3s 限频记录取证信息。
      */
+    /** 反射取 pager 的 adapter 页数；取不到返回 -1（调用方按"不是目标 pager"处理） */
+    private fun pagerAdapterCount(pager: ViewGroup): Int = try {
+        val getAdapter = pager.javaClass.methods.firstOrNull {
+            it.name == "getAdapter" && it.parameterTypes.isEmpty()
+        }
+        val adapter = getAdapter?.invoke(pager)
+        adapter?.javaClass?.getMethod("getCount")?.invoke(adapter) as? Int ?: -1
+    } catch (_: Throwable) {
+        -1
+    }
+
     private fun promoPageHook(
         chain: XposedInterface.Chain, swipeCls: Class<*>, m: Method, getCurrentItem: Method?
     ): Any? {
@@ -2436,6 +2472,17 @@ object UiCleaner {
         if (pager.javaClass != swipeCls) return chain.proceed()
         val target = (chain.getArg(0) as? Int) ?: return chain.proceed()
         val width = pager.width
+
+        // ⭐ R88 页数门禁（真机实锤）：**搜索页的 tab 容器也是 SwipeViewPage**
+        // （实测 8 页、全屏 1220x2712、祖先 FragmentStackView/ajd），
+        // 点「歌曲」= setCurrentItem(1) 会命中本 hook，被改写成 pinned=2 ⇒
+        // 列表渲染成**视频数据**（用户实锤：「查看更多单曲」→ 切到歌曲 tab 却显示视频列表）。
+        // 目标 pager 是"我的"页内嵌的推广页，只有 3 页（pinned 取值 0/2 即出自此）
+        // ⇒ 用页数把两者分开；取不到页数时放行（宁可不拦推广页，也不能动搜索页）。
+        if (target == 1) {
+            val cnt = pagerAdapterCount(pager)
+            if (cnt < 2 || cnt > 4) return chain.proceed()
+        }
 
         if (target != 1 || width <= 0 || pager.scrollX % width != 0) {
             // 取证（3s 限频）：记录翻页参数与当前页
