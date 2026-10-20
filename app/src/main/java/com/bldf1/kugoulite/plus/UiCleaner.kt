@@ -163,6 +163,14 @@ object UiCleaner {
         val sectionMode: Boolean = false,
         val useCardHide: Boolean = false,
         val excludeIdNames: List<String> = listOf(),
+        // 文本排除门禁：命中这些词就整条规则跳过。
+        // 真机实锤（设置页两处空白）：搜索推广规则按"广告/推广"匹配，把隐私设置里
+        // 「定向广告推送」「互动广告管理」这两个开关的标题也藏了，只剩开关没有文字。
+        val excludeTextKeywords: List<String> = listOf(),
+        // Activity 名门禁（治本）：只在该类名包含指定片段的 Activity 里生效。
+        // 「搜索推广」就用它 —— 这条规则本该只管搜索页，之前靠"广告/推广"短词
+        // 全 app 命中，把设置页三行标题都藏了（真机实锤）。
+        val requireActivityName: String? = null,
         // 类名排除门禁（真机实锤 15:0x）：同一资源 ID 在首页顶栏与我的页是
         // 完全不同的控件——「我的页赚钱入口」(dk_) 的祖先判定
         // TwoViewSwitchLayout 在首页顶栏同样成立，会把顶栏"乐库"入口一起
@@ -274,10 +282,23 @@ object UiCleaner {
         // 排除推荐语槽位。（更彻底的"只在搜索页生效"需要搜索页祖先 ID，留待后续。）
         Rule(Settings.KEY_UI_SEARCH_AD, "搜索推广",
             listOf("SearchAd", "SearchPromo"), listOf("广告", "推广"),
-            excludeIdNames = listOf("b5w")),
+            excludeIdNames = listOf("b5w"),
+            // ⭐ R148 治本：限定在搜索类 Activity 内生效。之前没有任何页面门禁，
+            // "广告/推广"两个短词在设置页命中了「定向广告推送」「互动广告管理」
+            // 「广告应用下载清单」三行标题（用户实锤：关掉本开关这三行才恢复）。
+            requireActivityName = "Search",
+            // ⭐ R146：搜索推广按"广告/推广"匹配，会连隐私设置里的开关标题一起藏
+            // （「定向广告推送」「互动广告管理」），导致设置页出现只剩开关的空白行。
+            // 真机日志实锤：UI净化[搜索推广] 即时预隐藏 text="定向广告推送" id=hsb
+            excludeTextKeywords = listOf(
+                "定向广告推送", "互动广告管理", "广告数量", "广告与您的相关度", "互动广告",
+                // 设置页第三处：关闭搜索推广后这一行标题才回来（真机实锤）
+                "广告应用下载清单"
+            )),
         Rule(Settings.KEY_UI_SEARCH_BANNER, "搜索推广Banner",
             listOf(), listOf(), idNames = listOf("gu6"),
-            minYRatio = 0.20f, hideParentLevels = 2),
+            minYRatio = 0.20f, hideParentLevels = 2,
+            requireActivityName = "Search"),
         // ⭐ R100：搜索页默认页下方的**频道推荐区**（推荐/周榜/次元/AI… tab + 卡片列表）。
         // 祖先链真机实锤（模块内遍历，adb 的 uiautomator/dumpsys 都被该页动画挡住）：
         //   KGUIFrameLayout/gu7 < FrameLayout < ViewPager/**gue** < FrameLayout/**gub**
@@ -287,7 +308,8 @@ object UiCleaner {
         // 别处可能有同名节点（铁律：同类同 id 跨页复用是最大误伤源）。
         Rule(Settings.KEY_UI_SEARCH_CHANNEL, "搜索页频道推荐",
             listOf(), listOf(), idNames = listOf("gub", "gue"),
-            ancestorIdNames = listOf("e1k")),
+            ancestorIdNames = listOf("e1k"),
+            requireActivityName = "Search"),
         Rule(Settings.KEY_UI_MEMBER_BAR, "会员栏",
             listOf("VipBar", "MemberBar", "VipBanner"), listOf("开通会员", "开通概念版", "即将过期", "自动续费")),
         Rule(Settings.KEY_UI_MEMBER_WIDGET, "会员控件",
@@ -1266,6 +1288,10 @@ object UiCleaner {
                 if (hidden[0] > 200) return
                 val rule = TEXT_SCAN_RULES[i]
                 if (rule.textKeywords.none { text.contains(it) }) continue
+                rule.requireActivityName?.let { req ->
+                    if (!activity.javaClass.simpleName.contains(req, ignoreCase = true)) continue
+                }
+                if (rule.excludeTextKeywords.any { text.contains(it) }) continue
                 if (byClass.isNotEmpty() && byClass.contains(rule)) continue
                 if (applyRuleToView(view, rule, className, rn, text, activity, hidden)) {
                     stop = true; break
@@ -1290,6 +1316,10 @@ object UiCleaner {
         activity: Activity, hidden: IntArray
     ): Boolean {
         if (!Settings.isFeature(activity, rule.key)) return false
+        // Activity 名门禁（R148）：如「搜索推广」限定只在搜索类页面生效
+        rule.requireActivityName?.let { req ->
+            if (!activity.javaClass.simpleName.contains(req, ignoreCase = true)) return false
+        }
         var matched = false
         for (kw in rule.classKeywords) {
             if (className.contains(kw, ignoreCase = true)) {
@@ -1302,7 +1332,9 @@ object UiCleaner {
         }
         if (!matched && rule.textKeywords.isNotEmpty() && text != null) {
             if (rn == null || rn !in rule.excludeIdNames) {
-                for (kw in rule.textKeywords) { if (text.contains(kw)) { matched = true; break } }
+                if (rule.excludeTextKeywords.none { text.contains(it) }) {
+                    for (kw in rule.textKeywords) { if (text.contains(kw)) { matched = true; break } }
+                }
             }
         }
         if (!matched) return false
@@ -2164,6 +2196,7 @@ object UiCleaner {
                 for (rule in TEXT_RULES) {
                     if (!Settings.isFeature(ctx, rule.key)) continue
                     if (rule.textKeywords.none { t0.contains(it) }) continue
+                    if (rule.excludeTextKeywords.any { t0.contains(it) }) continue
                     val rn = resourceName(view)
                     if (rn != null && rn in rule.excludeIdNames) continue
                     if (rule.hideParentLevels > 0) {
@@ -2201,7 +2234,21 @@ object UiCleaner {
             // 只认 text 非空才恢复 ⇒ 永久不可见，IME 焦点错挂假输入框
             // MarqueeTextView(b75) ⇒ 搜索完全无法输入（模块关则正常）。
             // 修法：排除一切可编辑/触摸可聚焦的输入控件。
-            if ((text == null || text.isEmpty()) && view.isClickable
+            // ⭐ R144：加设置页排除。真机实锤：隐私设置页里几行开关的标题是
+            // 异步填充的，创建瞬间 text 为空且 clickable ⇒ 被这条规则当成"空标题槽位"
+            // 隐藏，结果设置页上出现"只剩开关、没有标题"的两处空白（用户反馈）。
+            // 这条规则的目的是清「概念实验室」区块残留的空标题占位，
+            // 设置页不该被波及。
+            val inSettingsPage = try {
+                // ⚠️ view.context 通常是 ContextThemeWrapper 而非 Activity，
+                // 直接 `as? Activity` 恒为 null（第一次修复就是这么失效的）⇒ 必须逐层解包。
+                val cn = findActivity(view.context)?.javaClass?.simpleName ?: ""
+                cn.contains("Setting", ignoreCase = true)
+            } catch (_: Throwable) {
+                false
+            }
+            if (!inSettingsPage
+                && (text == null || text.isEmpty()) && view.isClickable
                 && textView !is android.widget.EditText
                 && !textView.isFocusableInTouchMode
             ) {
@@ -3589,6 +3636,18 @@ object UiCleaner {
 
     /** 已被 preDraw 钉住的书签容器（R139b） */
     private val headerFixers = java.util.WeakHashMap<View, Boolean>()
+
+
+    /** 从任意 Context 逐层解包找到宿主 Activity（ContextThemeWrapper 很常见） */
+    private fun findActivity(ctx: android.content.Context?): android.app.Activity? {
+        var c = ctx
+        var d = 0
+        while (c != null && d++ < 10) {
+            if (c is android.app.Activity) return c
+            c = (c as? android.content.ContextWrapper)?.baseContext
+        }
+        return null
+    }
 
     private fun resourceName(view: View): String? {
         val id = view.id
