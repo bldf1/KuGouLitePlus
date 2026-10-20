@@ -555,8 +555,25 @@ object UiCleaner {
     private val LAB_TITLE_TICKS = longArrayOf(100, 200, 400)
     private const val SKIP_TEXT = "跳过"
 
+    // ⭐ R157：基础 hook 二分开关。SP 里写 <boolean name="debug_skip_text" value="true" />
+    //    即可跳过对应 hook（text/visibility/addview/inflate/setid），用于定位 OPPO 上
+    //    「换场景点不开」的元凶 hook。读取宿主 SP 文件（模块代码运行在宿主进程内，同 uid 可读）。
+    private val skipHooks: Set<String> by lazy {
+        try {
+            val f = java.io.File("/data/data/com.kugou.android.lite/shared_prefs/kugoulite_vip_config.xml")
+            if (!f.exists()) {
+                emptySet<String>()
+            } else {
+                val rx = kotlin.text.Regex("debug_skip_([a-z_]+)\" value=\"true\"")
+                rx.findAll(f.readText()).map { it.groupValues[1] }.toSet()
+            }
+        } catch (_: Throwable) {
+            emptySet<String>()
+        }
+    }
+
     fun install(xposed: XposedModule, classLoader: ClassLoader) {
-        installBookmarkMountHook(xposed)
+        if ("bookmarkmount" !in skipHooks) installBookmarkMountHook(xposed)
 
         try {
             val onResume = Reflector.findMethod(Activity::class.java, "onResume")
@@ -585,16 +602,16 @@ object UiCleaner {
                     result
                 }
             ModuleLog.log("UI净化引擎安装成功")
-            installPersistentHide(xposed, classLoader)
-            installAttachDetachHooks(xposed)
-            installAddViewHook(xposed)
-            installInnerAddHooks(xposed)
-            installInflateHook(xposed)
-            installSetIdHook(xposed)
-            installTextHook(xposed)
-            installVisibilityHook(xposed)
-            installPromoPageBlocker(xposed, classLoader)
-            installMainPagerTracker(xposed, classLoader)
+            if ("persistenthide" !in skipHooks) installPersistentHide(xposed, classLoader)
+            if ("attachdetach" !in skipHooks) installAttachDetachHooks(xposed)
+            if ("addview" !in skipHooks) installAddViewHook(xposed)
+            if ("inneradd" !in skipHooks) installInnerAddHooks(xposed)
+            if ("inflate" !in skipHooks) installInflateHook(xposed)
+            if ("setid" !in skipHooks) installSetIdHook(xposed)
+            if ("text" !in skipHooks) installTextHook(xposed)
+            if ("visibility" !in skipHooks) installVisibilityHook(xposed)
+            if ("promopage" !in skipHooks) installPromoPageBlocker(xposed, classLoader)
+            if ("pagertracker" !in skipHooks) installMainPagerTracker(xposed, classLoader)
             startPeriodicScan()
         } catch (e: Exception) {
             ModuleLog.log("UI净化引擎安装失败: $e")

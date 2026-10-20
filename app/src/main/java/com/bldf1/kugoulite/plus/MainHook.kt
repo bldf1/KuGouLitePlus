@@ -56,14 +56,26 @@ class MainHook : XposedModule() {
         GdtAdBlocker.install(this, classLoader)
 
         // 安装弹窗阻止器
-        PopupBlocker.install(this, classLoader)
+        // ⭐ R157：与 UiCleaner.skipHooks 同源的二分开关（debug_skip_*）
+        val skipHooks = try {
+            val f = java.io.File("/data/data/com.kugou.android.lite/shared_prefs/kugoulite_vip_config.xml")
+            if (!f.exists()) {
+                emptySet<String>()
+            } else {
+                val rx = kotlin.text.Regex("debug_skip_([a-z_]+)\" value=\"true\"")
+                rx.findAll(f.readText()).map { it.groupValues[1] }.toSet()
+            }
+        } catch (_: Throwable) {
+            emptySet<String>()
+        }
+        if ("popupblocker" !in skipHooks) PopupBlocker.install(this, classLoader)
 
         // 安装自动点击器
-        AutoClicker.install(this, classLoader)
+        if ("autoclicker" !in skipHooks) AutoClicker.install(this, classLoader)
 
         // UI净化引擎（去广告/隐藏会员类，关键词防御式 + 持续隐藏）
         UiCleaner.install(this, classLoader)
-        installSplashReopenGuard(this, classLoader)
+        if ("splashguard" !in skipHooks) installSplashReopenGuard(this, classLoader)
 
         // 🔬 临时诊断（R63）：观察宿主 feed 适配器是否还在插入新 item
         //（定位「发现页刷不到底」用；`FeedProbe.ENABLED` 置 false 即关闭）
@@ -73,19 +85,19 @@ class MainHook : XposedModule() {
         CardProbe.install(this, classLoader)
 
         // 防检测（签名一致性）
-        IntegrityBypass.install(this)
+        if ("integrity" !in skipHooks) IntegrityBypass.install(this)
 
         // 寄生模块设置入口（主界面长按底栏）
-        SettingsEntry.install(this)
+        if ("settingsentry" !in skipHooks) SettingsEntry.install(this)
 
         // 拦截发现页顶栏"下拉进入频道"手势（配合去频道开关）
-        ChannelGestureBlocker.install(this, classLoader)
+        if ("gesture" !in skipHooks) ChannelGestureBlocker.install(this, classLoader)
 
         // 频道页「发帖引导条」源头拦截（「开启美好的一天」+ 去发布，5 秒后自行滑出）
-        ChannelPostGuideBlocker.install(this, classLoader)
+        if ("postguide" !in skipHooks) ChannelPostGuideBlocker.install(this, classLoader)
 
         // 词幕(Lyricon)歌词提供器 —— 只在 .support 进程真正安装（MediaSession 在那边）
-        LyriconBridge.install(this, classLoader, processName)
+        if ("lyricon" !in skipHooks) LyriconBridge.install(this, classLoader, processName)
 
         // Hook Application.onCreate
         hookApplicationOnCreate(classLoader)

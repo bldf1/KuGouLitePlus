@@ -28,6 +28,17 @@ import java.util.WeakHashMap
  */
 object PopupBlocker {
 
+    // ⭐ R158：白名单——「切换场景」面板的三张场景卡全部带「限免」标签，
+    // 会被 BLOCK_KEYWORDS 的宽泛词误拦（OPPO 实锤：面板永远弹不出，表现为
+    // "点换场景没反应"）。含此标题的浮层整层放行。
+    private val WHITELIST_KEYWORDS = arrayOf("切换场景")
+
+    private fun containsWhitelist(view: View?): Boolean = try {
+        containsKeyword(view, WHITELIST_KEYWORDS)
+    } catch (_: Exception) {
+        false
+    }
+
     // 强阻止关键词：命中说明是纯广告/推广弹窗，AutoClicker 点了也没用
     private val BLOCK_KEYWORDS = arrayOf(
         "签到", "立即领取", "去领取", "马上领取",
@@ -144,7 +155,7 @@ object PopupBlocker {
             val flagHooker = XposedInterface.Hooker { chain ->
                 try {
                     val dialog = chain.thisObject as? Dialog
-                    if (dialog != null && containsClaimKeyword(dialog)
+                    if (dialog != null && !containsWhitelist(dialog.window?.decorView) && containsClaimKeyword(dialog)
                         // 让行弹窗不标记：含 AutoClicker 可点击词且无强阻止词，
                         // 标记后会在 show 阶段被检查1 拦死（冲突已修复）
                         && !shouldYieldToAutoClicker(dialog)
@@ -200,6 +211,14 @@ object PopupBlocker {
                     } catch (_: Throwable) {
                     }
 
+                    // ⭐ R158 白名单：换场景面板整层放行（含限免卡片词）
+                    try {
+                        if (containsWhitelist(dialog.window?.decorView)) {
+                            return@intercept chain.proceed()
+                        }
+                    } catch (_: Throwable) {
+                    }
+
                     // 检查1：是否已标记
                     try {
                         if (flaggedDialogs[dialog] == true) {
@@ -234,6 +253,7 @@ object PopupBlocker {
                     val result = chain.proceed()
                     try {
                         if (!shouldYieldToAutoClicker(dialog)
+                            && !containsWhitelist(dialog.window?.decorView)
                             && containsClaimKeyword(dialog) && dialog.isShowing
                         ) {
                             ModuleLog.log("强制关闭漏网领取弹窗")
@@ -291,7 +311,7 @@ object PopupBlocker {
                                 ModuleLog.log("DIAG addView: ${view.javaClass.name} ctx=${view.context?.javaClass?.name} ty=${lp?.type} | ${flattenText(view)}")
                             } catch (_: Throwable) {
                             }
-                            if (containsClaimKeyword(view)) {
+                            if (!containsWhitelist(view) && containsClaimKeyword(view)) {
                                 ModuleLog.log("底层拦截领取浮层(WindowManager)")
                                 return@intercept null // 阻止添加到窗口
                             }
