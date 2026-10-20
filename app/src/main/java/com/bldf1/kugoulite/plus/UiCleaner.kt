@@ -3663,27 +3663,6 @@ object UiCleaner {
      */
     private val idNameCache = android.util.SparseArray<String>(64)
 
-    /**
-     * R137：判断这个节点是否位于**播放页顶栏**。
-     * 不能用 hasAncestorId("dt7") —— 真机实测 dt7 不是 dln 的祖先，而是 dlw 的**兄弟**
-     * （同属一个父容器）。所以改为：向上若干层，检查每一层的**兄弟节点**里有没有 dt7。
-     * dt7 只在播放页出现（发现页没有），这是当前唯一可靠的播放页判据。
-     */
-    private fun isPlayerHeader(v: View): Boolean {
-        var p: android.view.ViewParent? = v.parent
-        var d = 0
-        while (p is View && d++ < 12) {
-            val parent = p.parent as? android.view.ViewGroup
-            if (parent != null) {
-                for (i in 0 until parent.childCount) {
-                    val c = parent.getChildAt(i) ?: continue
-                    if (c !== p && c.id != View.NO_ID && resourceName(c) == "dt7") return true
-                }
-            }
-            p = p.parent
-        }
-        return false
-    }
 
     /** 已被 preDraw 钉住的书签容器（R139b） */
     private val headerFixers = java.util.WeakHashMap<View, Boolean>()
