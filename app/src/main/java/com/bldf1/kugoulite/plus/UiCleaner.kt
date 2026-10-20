@@ -2645,6 +2645,30 @@ object UiCleaner {
         if (target == 1) {
             val cnt = pagerAdapterCount(pager)
             if (cnt < 2 || cnt > 4) return chain.proceed()
+            // ⭐ R161：个人主页「故事」子 tab（发布/收藏/赞过）也是 3 页 SwipeViewPage
+            //    （祖先 KtvScrollableLayout/.../FragmentViewNormal，hook 内实拍），
+            //    点「收藏」=setCurrentItem(1) 会被下面的改写钉到别的页
+            //    （用户实锤：收藏 tab 无法进入）。R88 的页数门禁区分不了它和
+            //    「我的」页内嵌推广 pager（都是 3 页）⇒ 改用祖先链：
+            //    推广 pager 在 FragmentViewHome 主容器树内，个人主页 pager 不在。
+            var p2: android.view.ViewParent? = pager.parent
+            var inMainHome = false
+            var d2 = 0
+            while (p2 != null && d2++ < 20) {
+                if ((p2 as? View)?.javaClass?.simpleName == "FragmentViewHome") {
+                    inMainHome = true
+                    break
+                }
+                p2 = (p2 as? View)?.parent
+            }
+            if (!inMainHome) {
+                val now = SystemClock.uptimeMillis()
+                if (now - promoLastLog > 3000) {
+                    promoLastLog = now
+                    ModuleLog.log("UI净化[推广页] 非主容器树内 SwipeViewPage，放行（R161）")
+                }
+                return chain.proceed()
+            }
         }
 
         if (target != 1 || width <= 0 || pager.scrollX % width != 0) {
