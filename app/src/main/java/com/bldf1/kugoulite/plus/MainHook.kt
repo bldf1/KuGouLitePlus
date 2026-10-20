@@ -63,6 +63,7 @@ class MainHook : XposedModule() {
 
         // UI净化引擎（去广告/隐藏会员类，关键词防御式 + 持续隐藏）
         UiCleaner.install(this, classLoader)
+        installSplashReopenGuard(this, classLoader)
 
         // 🔬 临时诊断（R63）：观察宿主 feed 适配器是否还在插入新 item
         //（定位「发现页刷不到底」用；`FeedProbe.ENABLED` 置 false 即关闭）
@@ -102,6 +103,8 @@ class MainHook : XposedModule() {
                         val context = chain.thisObject as Context
                         ModuleLog.init(context)
                         ModuleLog.log("Application.onCreate 触发")
+                        // R150：记录进程启动时刻，供「启动页重入拦截」判断冷启动/回前台
+                        processStartAt = System.currentTimeMillis()
                         ModuleLog.log("Application类: ${context.javaClass.name}")
                         LyriconBridge.onAppCreate(context)
                         ClaimWorker.start(context, classLoader)
@@ -120,4 +123,76 @@ class MainHook : XposedModule() {
         private const val TAG = "[KuGouLiteVip]"
         private const val TARGET_PACKAGE = "com.kugou.android.lite"
     }
+
+    /**
+     * R150：拦截「后台回前台时再次进入启动页」。
+     *
+     * 现象（用户需求）：从后台切回酷狗时会重新走一遍 SplashActivity（启动页广告位）。
+     * 做法：hook SplashActivity.onCreate，按「距进程启动的时长」区分冷启动与回前台 ——
+     *   进程刚起（<=3s）时的 SplashActivity 是真正的冷启动，放行；
+     *   超过 3s 才出现的，说明是回前台重新拉起，直接 finish 掉。
+     * 复用「去开屏广告」开关（KEY_UI_SPLASH）。
+     */
+    @Volatile
+    private var processStartAt = 0L
+
+    private fun installSplashReopenGuard(xposed: XposedModule, cl: ClassLoader) {
+        // ⭐ 真正导致「后台回前台闪屏」的是 ForeSplashActivity（酷安帖实测：
+        //    com.kugou.android.app.splash.foresplash.ForeSplashActivity，用 Blocker 禁用它就不闪了）。
+        //    SplashActivity 是冷启动那个，两个都要处理。
+        for (clsName in listOf(
+            "com.kugou.android.app.splash.foresplash.ForeSplashActivity",
+            "com.kugou.android.app.splash.SplashActivity"
+        )) {
+        try {
+            val cls = Class.forName(clsName, false, cl)
+            val m = cls.getDeclaredMethod("onCreate", android.os.Bundle::class.java)
+            xposed.hook(m).intercept { chain ->
+                val ret = chain.proceed()
+                try {
+                    val act = chain.thisObject as? android.app.Activity
+                    if (act != null) {
+                        val elapsed = System.currentTimeMillis() - processStartAt
+                        if (elapsed > 3000L && Settings.isFeature(act, Settings.KEY_UI_SPLASH)) {
+                            ModuleLog.log("启动页重入拦截: finish (距启动 ${elapsed}ms)")
+                            // 目标：无缝回到前台，不能黑屏也不能看到启动页。
+                            // 做法：把内容换成纯色（挡住启动页那一帧），然后直接跳主界面
+                            // MediaActivity（CLEAR_TOP|SINGLE_TOP 复用它，不重建）再 finish。
+                            try {
+                                // 启动图通常挂在 window background（theme 里的 splash drawable），
+                                // 只换 setContentView 挡不住它 ⇒ 必须一并把窗口背景换掉。
+                                act.window?.setBackgroundDrawable(
+                                    android.graphics.drawable.ColorDrawable(0xFF121212.toInt())
+                                )
+                                val blank = android.view.View(act)
+                                blank.setBackgroundColor(0xFF121212.toInt())
+                                act.setContentView(blank)
+                            } catch (_: Throwable) {
+                            }
+                            try {
+                                val intent = android.content.Intent().apply {
+                                    setClassName(act, "com.kugou.android.app.MediaActivity")
+                                    addFlags(
+                                        android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                            android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                    )
+                                }
+                                act.startActivity(intent)
+                            } catch (t: Throwable) {
+                                ModuleLog.log("跳主界面失败: $t")
+                            }
+                            act.finish()
+                        }
+                    }
+                } catch (_: Throwable) {
+                }
+                ret
+            }
+            ModuleLog.log("启动页重入拦截 Hook 安装成功: $clsName")
+        } catch (e: Throwable) {
+            ModuleLog.log("启动页重入拦截 Hook 失败 $clsName: $e")
+        }
+        }
+    }
+
 }

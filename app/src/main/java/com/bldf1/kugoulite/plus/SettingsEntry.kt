@@ -769,10 +769,25 @@ object SettingsEntry {
 
     private fun detachOverlay(content: ViewGroup?, overlay: View) {
         panelClosing = false
+        // ⭐ R156：overlay 是**全屏且 clickable**（setOnClickListener 自动置 clickable），
+        //    一旦没真正摘掉就会吞掉全页点击（用户实锤：播放页「换场景」点不动，
+        //    TOUCH 诊断显示被 0,0-1220,2712 的 FrameLayout clickable=true 吃掉了）。
+        //    两道保险：① 先置 GONE 保证不再拦触摸；② 按**真实 parent** 移除
+        //    （content.removeView 对非直接子 View 会静默失败）。
         try {
-            content?.removeView(overlay)
-            ModuleLog.log("设置面板已关闭")
+            overlay.visibility = View.GONE
         } catch (_: Throwable) {
+        }
+        try {
+            val p = overlay.parent as? ViewGroup
+            if (p != null) {
+                p.removeView(overlay)
+            } else {
+                content?.removeView(overlay)
+            }
+            ModuleLog.log("设置面板已关闭(parent=${p?.javaClass?.simpleName ?: "null"})")
+        } catch (t: Throwable) {
+            ModuleLog.log("设置面板移除失败: $t")
         } finally {
             panel = null
             panelHost = null
