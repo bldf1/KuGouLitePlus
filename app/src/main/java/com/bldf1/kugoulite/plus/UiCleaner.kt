@@ -816,6 +816,9 @@ object UiCleaner {
         }
     }
 
+    @Volatile
+    private var periodicTick = 0L
+
     private fun startPeriodicScan() {
         if (!PERIODIC_SCAN_ENABLED) {
             ModuleLog.log("UI净化[诊断] 周期巡检已关闭（PERIODIC_SCAN_ENABLED=false）")
@@ -826,18 +829,25 @@ object UiCleaner {
                 try {
                     val a = currentActivity?.get()
                     if (a != null && !a.isFinishing && !a.isDestroyed) {
-                        // 巡检临时关闭（Round 18）：每 20s 刷 600 行把启动/隐藏
-                        // 日志滚出 445 行上限，诊断期不可用；需要时再打开
-                        run {
-                            val __tg = PerfProbe.start()
-                            reevaluateGatedHides("周期4s")
-                            PerfProbe.end(PerfProbe.GATED, __tg)
+                        // ⭐ R159：巡检降频错峰。实测（PerfProbe，小米）个人主页/收藏等
+                        // 贵树页面单次全树扫描 4-8ms、峰值 17ms（OPPO 更贵，实测 25ms），
+                        // 原 4s 周期且门禁重算+全树扫描同拍执行，主线程单次占用过大，
+                        // 撞上用户滑动/点击即掉帧（用户反馈"个人主页/收藏卡顿"）。
+                        // 改为 8s 周期且两动作交替执行 ⇒ 单次占用减半、频率减半。
+                        periodicTick++
+                        if (periodicTick % 2 == 0L) {
+                            run {
+                                val __tg = PerfProbe.start()
+                                reevaluateGatedHides("周期8s")
+                                PerfProbe.end(PerfProbe.GATED, __tg)
+                            }
+                        } else {
+                            safeScan(a)
                         }
-                        safeScan(a)
                     }
                 } catch (_: Exception) {
                 }
-                mainHandler.postDelayed(this, 4000)
+                mainHandler.postDelayed(this, 8000)
             }
         }, 4000)
     }
