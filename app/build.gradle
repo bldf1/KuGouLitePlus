@@ -58,8 +58,8 @@ android {
         // targetSdk 原来写的是 37 —— 那是预览版号（Android 17 Developer Preview），
         // 不是正式 SDK。改成 34（正式、稳定、对模块无副作用）。
         targetSdk 34
-        versionCode 5
-        versionName "1.2.2"
+        versionCode 6
+        versionName "1.2.3"
     }
 
     signingConfigs {
