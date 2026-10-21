@@ -171,6 +171,13 @@ object UiCleaner {
         // 「搜索推广」就用它 —— 这条规则本该只管搜索页，之前靠"广告/推广"短词
         // 全 app 命中，把设置页三行标题都藏了（真机实锤）。
         val requireActivityName: String? = null,
+        // ⭐ R168「规则页面归属」：本规则**只在**这些页面生效。
+        // 空集合 = 所有页面（向后兼容，现有规则不标注即保持原行为）。
+        // 页面 id 见 computePageId()：search / player / discovery / main /
+        // fav / recent / profile …
+        // 目的：把"全 app 跑一遍再靠门禁排除"改成"页面 → 规则集合"，
+        // 无规则的页面连判定都不做（性能 + 防误伤）。
+        val pageIds: Set<String> = emptySet(),
         // 类名排除门禁（真机实锤 15:0x）：同一资源 ID 在首页顶栏与我的页是
         // 完全不同的控件——「我的页赚钱入口」(dk_) 的祖先判定
         // TwoViewSwitchLayout 在首页顶栏同样成立，会把顶栏"乐库"入口一起
@@ -1101,6 +1108,8 @@ object UiCleaner {
         val __tSafe = PerfProbe.start()
         try {
             if (activity.isFinishing || activity.isDestroyed) return
+            // ⭐ R168：更新当前页面 id（供规则页面归属筛选）
+            curPageId = computePageId(activity)
             // ⭐ R167：收藏/最近/本地/已购/个人主页 无净化目标，整页跳过
             if (isCleanListPage(activity)) return
             val decor = activity.window?.decorView ?: return
@@ -2072,6 +2081,7 @@ object UiCleaner {
                     val offscreen = loc[0] + v.width <= 0 || loc[0] >= screenW
                     if (!offscreen) continue
                     for (rule in rules) {
+                if (rule.pageIds.isNotEmpty() && curPageId !in rule.pageIds) continue
                         if (!rule.requireMinePage) continue
                         if (!Settings.isFeature(v.context, rule.key)) continue
                         if (!matchIdRule(v, rule, skipPageGate = true)) continue
@@ -2101,6 +2111,7 @@ object UiCleaner {
                     val rules = idRuleMap[rn]
                     if (rules != null) {
                         for (rule in rules) {
+                if (rule.pageIds.isNotEmpty() && curPageId !in rule.pageIds) continue
                             if (!rule.requireMinePage) continue
                             if (!Settings.isFeature(v.context, rule.key)) continue
                             if (!matchIdRule(v, rule)) continue
@@ -2170,6 +2181,7 @@ object UiCleaner {
             val rn = resourceName(view) ?: return
             val rules = idRuleMap[rn] ?: return
             for (rule in rules) {
+                if (rule.pageIds.isNotEmpty() && curPageId !in rule.pageIds) continue
                 if (!Settings.isFeature(view.context, rule.key)) continue
                 // 可见触发路径跳过页面门禁规则（避免与"页面切换恢复"互拉成环）
                 if (fromVisibility && rule.requireMinePage) continue
@@ -2205,6 +2217,37 @@ object UiCleaner {
     private var pageTagValidFor: java.lang.ref.WeakReference<Activity>? = null
 
     /** 当前页面是否属于"无需净化"的列表页 */
+    // ⭐ R168：当前页面 id（每次 scan/挂载入口更新一次，供规则页面归属筛选）
+    @Volatile
+    private var curPageId: String = ""
+
+    /** 计算页面 id：Activity 类名 → 栈顶 Fragment → 主 pager 页 */
+    private fun computePageId(a: Activity): String = try {
+        val cn = a.javaClass.name
+        when {
+            cn.contains("Search", true) -> "search"
+            else -> {
+                val tag = activePageTag(a)
+                if (tag == "?") {
+                    // 主 pager：0=发现 / 1=我的
+                    if (mainPageIndex == 1) "main" else "discovery"
+                } else when {
+                    tag.contains("FavMain") -> "fav"
+                    tag.contains("HistoryMain") -> "recent"
+                    tag.contains("NewestUserCenter") -> "profile"
+                    tag.contains("Local") -> "local"
+                    tag.contains("Purchas") || tag.contains("Bought") -> "bought"
+                    tag.contains("Player") -> "player"
+                    tag.contains("Discovery") -> "discovery"
+                    tag.contains("Mine") -> "main"
+                    else -> "frag:" + tag.substringAfterLast('.')
+                }
+            }
+        }
+    } catch (_: Throwable) {
+        ""
+    }
+
     private fun isCleanListPage(a: Activity): Boolean = try {
         val now = SystemClock.uptimeMillis()
         val ref = pageTagValidFor?.get()
@@ -2268,9 +2311,11 @@ object UiCleaner {
     }
 
     private fun onViewAttached(view: View) {
-        // ⭐ R167：清单类页面（收藏/最近/本地/已购/个人主页）无净化目标，
-        //      直接跳过每视图的挂载判定（冷启首屏 400+ 次调用的主要成本）
-        currentActivity?.get()?.let { if (isCleanListPage(it)) return }
+        // ⭐ R167/R168：清单类页面整页跳过；其余页面先刷新页面 id 供规则筛选
+        currentActivity?.get()?.let {
+            if (isCleanListPage(it)) return
+            if (curPageId.isEmpty()) curPageId = computePageId(it)
+        }
         val name = view.javaClass.name
         val ctx = view.context
         // ⚠️ 性能（真机 10-12）：`isOwnPanel` 沿祖先链走（O(深度)），原在本函数内
@@ -2310,6 +2355,7 @@ object UiCleaner {
             val rules = idRuleMap[rnAttach]
             if (rules != null) {
                 for (rule in rules) {
+                if (rule.pageIds.isNotEmpty() && curPageId !in rule.pageIds) continue
                     if (!Settings.isFeature(ctx, rule.key)) continue
                     // 类名排除门禁（顶栏 MainTopImageView 不能被"我的页赚钱入口"命中）
                     if (rule.excludeClassNames.isNotEmpty()
@@ -2349,6 +2395,7 @@ object UiCleaner {
             val t0 = text
             if (mayBePromo(t0) && !isOwn) {
                 for (rule in TEXT_RULES) {
+                    if (rule.pageIds.isNotEmpty() && curPageId !in rule.pageIds) continue
                     if (!Settings.isFeature(ctx, rule.key)) continue
                     if (rule.textKeywords.none { t0.contains(it) }) continue
                     if (rule.excludeTextKeywords.any { t0.contains(it) }) continue
