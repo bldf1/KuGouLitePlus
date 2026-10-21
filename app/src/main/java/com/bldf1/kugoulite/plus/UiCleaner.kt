@@ -580,6 +580,14 @@ object UiCleaner {
     }
 
     fun install(xposed: XposedModule, classLoader: ClassLoader) {
+        // ⭐ R171：调度骨架总开关（onResume → scheduleScan + attachPreDrawScan）。
+        // 实测：21 个 hook 全不装时首屏 104 帧，模块全停用是 369 帧
+        // ⇒ 剩下 3.5 倍差距来自这个骨架本身（每次 resume 排 5 档全树扫描 +
+        // 700ms 内逐帧画前扫描）。
+        if ("core" in skipHooks) {
+            ModuleLog.log("UI净化: 调度骨架被 debug_skip_core 跳过")
+            return
+        }
         if ("bookmarkmount" !in skipHooks) installBookmarkMountHook(xposed)
 
         try {

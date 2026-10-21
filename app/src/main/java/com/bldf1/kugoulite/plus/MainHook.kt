@@ -49,13 +49,6 @@ class MainHook : XposedModule() {
         ModuleLog.log("========== 模块已加载 ==========")
         ModuleLog.log("目标包名: ${param.packageName}")
 
-        // 安装 OkHttp 凭证捕获
-        NetCapture.install(this, classLoader)
-
-        // GDT(优量汇)广告 SDK 自带网络层：广告请求直接给"成功空响应"（零闪现）
-        GdtAdBlocker.install(this, classLoader)
-
-        // 安装弹窗阻止器
         // ⭐ R157：与 UiCleaner.skipHooks 同源的二分开关（debug_skip_*）
         val skipHooks = try {
             val f = java.io.File("/data/data/com.kugou.android.lite/shared_prefs/kugoulite_vip_config.xml")
@@ -68,6 +61,13 @@ class MainHook : XposedModule() {
         } catch (_: Throwable) {
             emptySet<String>()
         }
+        // 安装 OkHttp 凭证捕获
+        if ("netcapture" !in skipHooks) NetCapture.install(this, classLoader)
+
+        // GDT(优量汇)广告 SDK 自带网络层：广告请求直接给"成功空响应"（零闪现）
+        if ("gdt" !in skipHooks) GdtAdBlocker.install(this, classLoader)
+
+        // 安装弹窗阻止器
         if ("popupblocker" !in skipHooks) PopupBlocker.install(this, classLoader)
 
         // 安装自动点击器
