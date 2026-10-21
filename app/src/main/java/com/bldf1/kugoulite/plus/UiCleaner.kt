@@ -1101,6 +1101,8 @@ object UiCleaner {
         val __tSafe = PerfProbe.start()
         try {
             if (activity.isFinishing || activity.isDestroyed) return
+            // ⭐ R167：收藏/最近/本地/已购/个人主页 无净化目标，整页跳过
+            if (isCleanListPage(activity)) return
             val decor = activity.window?.decorView ?: return
             val hidden = IntArray(1)
             val now = android.os.SystemClock.uptimeMillis()
@@ -2122,6 +2124,8 @@ object UiCleaner {
      * 在 `setVisibility(VISIBLE)` 的同一调用里立刻隐藏，本帧就画不出来。
      */
     private fun preHideSelf(view: View, fromVisibility: Boolean = false, fromMount: Boolean = false) {
+        // ⭐ R167：同上，清单类页面整页跳过
+        currentActivity?.get()?.let { if (isCleanListPage(it)) return }
         // ⚠️ 快速路径必须放在最前（真机 10-12 性能，本轮再前移）：绝大多数节点
         // 既没有资源 ID、类名也不是悬浮按钮类 —— 直接返回。这类节点**永远不可能
         // 被本引擎隐藏**，因此不需要计数器，也无须做资源查表。
@@ -2182,6 +2186,58 @@ object UiCleaner {
     }
 
     /** 挂载判定链（核心）：ID 制导即时预隐藏 + 文本关键词预隐藏 + 各专属路径 */
+    // ⭐ R167：无广告/推广元素的页面白名单。
+    // 实测（OPPO）：点进「收藏/最近/本地/已购/个人主页」时引擎**零动作**
+    // （新增净化日志全部来自「我的」页的会员栏/概念实验室），但这些页面仍要
+    // 承担 400+ 次挂载判定与周期全树扫描 ⇒ 冷启首次打开「最近」实测 95th 109ms
+    //（基线 29ms）。按栈顶 Fragment 判定命中即整页跳过。
+    // 「我的」页取不到 Fragment（返回 "?"，它是 ViewPager 的 page 而非 support
+    // fragment）⇒ 不会被前缀命中，会员栏/赚钱入口净化不受影响。
+    private val CLEAN_PAGE_EXACT = arrayOf(
+        "com.kugou.android.userCenter.newest.NewestUserCenterMainFragment"
+    )
+
+    @Volatile
+    private var pageTagCache = ""
+    @Volatile
+    private var pageTagAt = 0L
+    @Volatile
+    private var pageTagValidFor: java.lang.ref.WeakReference<Activity>? = null
+
+    /** 当前页面是否属于"无需净化"的列表页 */
+    private fun isCleanListPage(a: Activity): Boolean = try {
+        val now = SystemClock.uptimeMillis()
+        val ref = pageTagValidFor?.get()
+        val tag = if (ref === a && now - pageTagAt < 800L) {
+            pageTagCache
+        } else {
+            val t = activePageTag(a)
+            pageTagCache = t
+            pageTagAt = now
+            pageTagValidFor = java.lang.ref.WeakReference(a)
+            t
+        }
+        tag.startsWith("com.kugou.android.mymusic.") || tag in CLEAN_PAGE_EXACT
+    } catch (_: Throwable) {
+        false
+    }
+
+    /** 当前栈顶（resumed）Fragment 的类名；取不到返回 "?" */
+    private fun activePageTag(a: Activity): String = try {
+        val getFm = a.javaClass.methods.firstOrNull {
+            it.name == "getSupportFragmentManager" && it.parameterTypes.isEmpty()
+        }
+        val fm = getFm?.invoke(a)
+        val fs = fm?.javaClass?.getMethod("getFragments")?.invoke(fm) as? List<*>
+        val resumed = fs?.lastOrNull { f ->
+            f != null && (f.javaClass.methods.firstOrNull { it.name == "isResumed" }
+                ?.invoke(f) as? Boolean) == true
+        }
+        (resumed ?: fs?.lastOrNull())?.javaClass?.name ?: "?"
+    } catch (_: Throwable) {
+        "?"
+    }
+
     /** 规则 id 的 int 集合（懒初始化，随首次挂载用 view.resources 建立） */
     @Volatile
     private var ruleIdIntSet: Set<Int>? = null
@@ -2212,6 +2268,9 @@ object UiCleaner {
     }
 
     private fun onViewAttached(view: View) {
+        // ⭐ R167：清单类页面（收藏/最近/本地/已购/个人主页）无净化目标，
+        //      直接跳过每视图的挂载判定（冷启首屏 400+ 次调用的主要成本）
+        currentActivity?.get()?.let { if (isCleanListPage(it)) return }
         val name = view.javaClass.name
         val ctx = view.context
         // ⚠️ 性能（真机 10-12）：`isOwnPanel` 沿祖先链走（O(深度)），原在本函数内
