@@ -2415,43 +2415,29 @@ object UiCleaner {
         if (textView != null && text != null && TEXT_RULES.isNotEmpty()) {
             val t0 = text
             if (mayBePromo(t0) && !isOwn) {
-                // ⭐ R170：文本规则匹配整体延后到下一帧执行。
-                // 实测（OPPO，冷启首次打开「最近」583 首）：模块停用时首屏 3s 内 369 帧
-                // （≈120fps 加载动画），模块开着只有 48 帧（≈16fps，卡成幻灯片）。
-                // 400+ 次挂载里 ID 规则已是 O(1)、isOwnPanel 已按需，剩下最大的
-                // 就是这 30 条规则的逐条 contains。mayBePromo 预筛后命中极少，
-                // 延后一帧不会造成可见闪现。
-                val __v = view
-                val __t0 = t0
-                mainHandler.post {
-                    try {
-                        if (!__v.isAttachedToWindow) return@post
-                        for (rule in TEXT_RULES) {
-                        if (rule.pageIds.isNotEmpty() && curPageId !in rule.pageIds) continue
-                        if (!Settings.isFeature(__v.context, rule.key)) continue
-                        if (rule.textKeywords.none { __t0.contains(it) }) continue
-                        if (rule.excludeTextKeywords.any { __t0.contains(it) }) continue
-                        val rn = resourceName(__v)
-                        if (rn != null && rn in rule.excludeIdNames) continue
-                        if (rule.hideParentLevels > 0) {
-                            // Round 51+：连父类规则（如淘宝条/天猫卡/每周福利条）在
-                            // 挂载期直接走 hideByIdRule 爬升藏父容器——若只 GONE 文本
-                            // 自身，容器底板/按钮会留到下轮全树扫描（最长数秒），
-                            // 出现「文字没了条还在」的残缺窗口
-                            // （文本触发+爬升白名单类：父不匹配直接跳过，防正文误伤，
-                            //   与 applyRuleToView 的放弃逻辑一致）
-                            if (rule.climbParentIdNames.isEmpty() || climbLevels(__v, rule) > 0) {
-                                hideByIdRule(__v, rule, "mount-text")
-                            }
-                        } else {
-                            __v.visibility = View.GONE
-                            hiddenByUs[__v] = rule
-                            ModuleLog.log("UI净化[${rule.name}] 即时预隐藏(文本挂载) text=\"$__t0\" id=${rn ?: "-"} v=${Integer.toHexString(__v.hashCode())} 已绘制=${if (wasDrawn(__v)) "是" else "否"}")
+                for (rule in TEXT_RULES) {
+                    if (rule.pageIds.isNotEmpty() && curPageId !in rule.pageIds) continue
+                    if (!Settings.isFeature(ctx, rule.key)) continue
+                    if (rule.textKeywords.none { t0.contains(it) }) continue
+                    if (rule.excludeTextKeywords.any { t0.contains(it) }) continue
+                    val rn = resourceName(view)
+                    if (rn != null && rn in rule.excludeIdNames) continue
+                    if (rule.hideParentLevels > 0) {
+                        // Round 51+：连父类规则（如淘宝条/天猫卡/每周福利条）在
+                        // 挂载期直接走 hideByIdRule 爬升藏父容器——若只 GONE 文本
+                        // 自身，容器底板/按钮会留到下轮全树扫描（最长数秒），
+                        // 出现「文字没了条还在」的残缺窗口
+                        // （文本触发+爬升白名单类：父不匹配直接跳过，防正文误伤，
+                        //   与 applyRuleToView 的放弃逻辑一致）
+                        if (rule.climbParentIdNames.isEmpty() || climbLevels(view, rule) > 0) {
+                            hideByIdRule(view, rule, "mount-text")
                         }
-                        break
-                        }
-                    } catch (_: Throwable) {
+                    } else {
+                        view.visibility = View.GONE
+                        hiddenByUs[view] = rule
+                        ModuleLog.log("UI净化[${rule.name}] 即时预隐藏(文本挂载) text=\"$t0\" id=${rn ?: "-"} v=${Integer.toHexString(view.hashCode())} 已绘制=${if (wasDrawn(view)) "是" else "否"}")
                     }
+                    break
                 }
             }
         }
