@@ -805,10 +805,12 @@ object UiCleaner {
                                 } else {
                                     // 1) 同步门禁判定：切页后立刻隐藏本页该隐藏的
                                     applyGatedHidesNow()
-                                    // 2) 动画期补判（只走门禁规则，代价极小）
-                                    mainHandler.postDelayed({ applyGatedHidesNow() }, 120)
-                                    mainHandler.postDelayed({ applyGatedHidesNow() }, 350)
-                                    // 3) 只保留一次延迟全量复核
+                                    // ⭐ R164：原此处还有 120ms / 350ms 两次补判，
+                                    //    每次切页共 4 次重活（用户实锤：点头像/收藏/
+                                    //    最近/本地/已购切页卡顿；实测 janky 18.7%）。
+                                    //    动画期的隐藏已由 preHideOffscreenGated（翻页前预置）
+                                    //    + 挂载/预隐藏 hook 覆盖，补判收益极低 ⇒ 删除。
+                                    // 2) 只保留一次延迟全量复核
                                     mainHandler.postDelayed({
                                         reevaluateGatedHides("翻-我的")
                                         currentActivity?.get()?.let { a ->
@@ -1105,13 +1107,20 @@ object UiCleaner {
             // 频道预览白屏自恢复：下拉被拦后酷狗可能把发现页视图隐藏（留白屏）。
             // ⚠️ 限流（本轮）：白屏是**持续状态**，不需要每次扫描（含启动期每帧）
             // 都做一次全树遍历判定 —— 8s 一次足够，省下大量主线程时间。
+            // ⭐ R164：白屏探测是全树遍历（实测 0.8~2.7ms），与主扫描同帧叠加会把
+            // safeScan 顶到 5~14ms，撞上切页/滑动就掉帧（用户实锤：点头像/收藏/
+            // 最近/本地/已购卡顿）⇒ 甩到下一帧执行，主帧只保留 scan。
             if (now - lastBlankProbeAt > 8000L) {
                 lastBlankProbeAt = now
-                try {
-                    val __tb = PerfProbe.start()
-                    autoRecoverBlankDiscover(decor, activity)
-                    PerfProbe.end(PerfProbe.BLANK, __tb)
-                } catch (_: Throwable) {}
+                mainHandler.post {
+                    try {
+                        if (activity.isFinishing || activity.isDestroyed) return@post
+                        val __tb = PerfProbe.start()
+                        autoRecoverBlankDiscover(decor, activity)
+                        PerfProbe.end(PerfProbe.BLANK, __tb)
+                    } catch (_: Throwable) {
+                    }
+                }
             }
             // 悬浮底栏（Round 24）：未改造时 500ms 一次尝试定位；已改造则 4s 一次存活校验。
             // 关掉开关立即还原宿主原样。
@@ -1136,10 +1145,17 @@ object UiCleaner {
             if (now <= preDrawUntilUptime && Settings.isFeature(activity, Settings.KEY_UI_SPLASH)) {
                 tryAutoClickSkip(decor)
             }
+            // ⭐ R164：同白屏探测，补扫也挪到下一帧（本身 0.1~1.1ms，但叠加即超预算）
             if (Settings.isFeature(activity, Settings.KEY_UI_FREE_LISTEN_BLOCK)) {
-                val __tf = PerfProbe.start()
-                findFreeListenTexts(decor, 0)
-                PerfProbe.end(PerfProbe.FREE_LISTEN, __tf)
+                mainHandler.post {
+                    try {
+                        if (activity.isFinishing || activity.isDestroyed) return@post
+                        val __tf = PerfProbe.start()
+                        findFreeListenTexts(decor, 0)
+                        PerfProbe.end(PerfProbe.FREE_LISTEN, __tf)
+                    } catch (_: Throwable) {
+                    }
+                }
             }
         } catch (_: Exception) {
         }
@@ -1946,7 +1962,11 @@ object UiCleaner {
      * 90 分位 44ms）的头号来源。冷启动真正"元素首次上屏"的窗口只有 1~2 秒，
      * 收紧到 2.5s 已覆盖全部零闪现需求，扫描次数直接减半以上。
      */
-    private const val PREDRAW_WINDOW_MS = 2500L
+    // ⭐ R164：画前扫描窗口 2500ms → 700ms。原窗口内**每帧**跑一次全树扫描
+    //（实测峰值 333 次/分钟，单次 0.9~11ms），叠在页面切换的渲染上就是掉帧；
+    // 用户实锤：点「头像/收藏/最近/本地/已购」切页时卡顿。700ms≈42 帧，
+    // 足够覆盖零闪现（R75 绘制前兜底永久生效 + 挂载/预隐藏 hook 仍在）。
+    private const val PREDRAW_WINDOW_MS = 700L
 
     private fun attachPreDrawScan(activity: Activity) {
         preDrawUntilUptime = android.os.SystemClock.uptimeMillis() + PREDRAW_WINDOW_MS
@@ -1967,7 +1987,7 @@ object UiCleaner {
         if (depth > 16) return
         // 节点预算：一次遍历最多 150 个节点（真机 10-12 卡顿实锤：翻页时
         // setVisibility(VISIBLE) 触发的整树遍历 × 频繁翻页 = 掉帧）
-        val b = budget ?: IntArray(1).also { it[0] = 150 }
+        val b = budget ?: IntArray(1).also { it[0] = 80 }
         if (b[0] <= 0) return
         b[0]--
         try {
