@@ -741,6 +741,19 @@ object UiCleaner {
                 xposed.hook(m)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept { chain ->
+                        // ⭐ R163：本 hook 只为主界面（发现↔我的）服务。
+                        //    hook 的是基类 `com.kugou.common.base.ViewPager`，
+                        //    **播放页的 3D 场景 pager 同样继承它** —— 换场景面板内部
+                        //    走 setCurrentItem 时会进到这里，执行 preHideOffscreenGated
+                        //    与底栏重排，把面板/按钮搞失效（OPPO 实锤：只跳本 hook
+                        //    换场景即恢复；小米因时序差异不受影响）。
+                        //    ⇒ 非 MainFragmentViewPage 一律原样放行。
+                        val pagerObj = chain.thisObject
+                        if (pagerObj == null ||
+                            !pagerObj.javaClass.name.contains("MainFragmentViewPage")
+                        ) {
+                            return@intercept chain.proceed()
+                        }
                         // 0) 目标页预置：点「我的」时**动画开始前**就把屏幕外那份
                         //    dk_（即将滑入的我的页实例）隐藏 —— 根治"赚钱闪一下"
                         try {
