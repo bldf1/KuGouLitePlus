@@ -2281,6 +2281,20 @@ object UiCleaner {
         "?"
     }
 
+    @Volatile
+    private var mbCacheOn = false
+    @Volatile
+    private var mbCacheAt = 0L
+
+    /** 「会员栏」开关状态缓存（2s）：避免每个挂载 TextView 都查一次 Settings */
+    private fun memberBarOnCached(ctx: android.content.Context): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - mbCacheAt < 2000L) return mbCacheOn
+        mbCacheAt = now
+        mbCacheOn = Settings.isFeature(ctx, Settings.KEY_UI_MEMBER_BAR)
+        return mbCacheOn
+    }
+
     /** 规则 id 的 int 集合（懒初始化，随首次挂载用 view.resources 建立） */
     @Volatile
     private var ruleIdIntSet: Set<Int>? = null
@@ -2323,7 +2337,6 @@ object UiCleaner {
         // ⚠️ 实测教训：不要用"惰性局部函数 own()"——Kotlin 会把捕获的可变局部量
         // 编译成闭包/Ref 对象，**每次挂载都分配** → GC 压力更大（实测 90th 19→25ms）。
         // 改为：只有 TextView 才可能用到该判定，非 TextView 直接 false，只算一次。
-        val isOwn = if (view is TextView) isOwnPanel(view) else false
         if (BADGE_DIAG) diagBadge(view, "挂载")
 
         // ⚠️ 性能（本轮）：文本只在挂载入口取一次并复用。
@@ -2332,7 +2345,15 @@ object UiCleaner {
         // 现在统一在入口求值一次（extractText 已改为返回 CharSequence，零分配）。
         val textView = view as? TextView
         val text: CharSequence? = if (textView != null) extractText(textView) else null
-        val memberBarOn = if (textView != null) Settings.isFeature(ctx, Settings.KEY_UI_MEMBER_BAR) else false
+        // ⭐ R169：isOwnPanel 要沿祖先链走（O(深度)），原来对**每个** TextView 都算一次。
+        // 实测冷启首屏（583 首列表，几百个 TextView）这是主要残余成本。
+        // 改为按需：只有"文本可能命中文本规则"或"概念实验室开关开着"才算，
+        // 其余（绝大多数列表项）直接跳过爬链。
+        val maybeTextRule = text != null && TEXT_RULES.isNotEmpty() && mayBePromo(text)
+        val labOn = textView != null && Settings.isFeature(ctx, Settings.KEY_UI_LAB)
+        val isOwn = if (maybeTextRule || labOn) isOwnPanel(view) else false
+        // 会员栏开关状态按时间缓存，避免每个 TextView 都查一次 Settings
+        val memberBarOn = if (textView != null) memberBarOnCached(ctx) else false
 
         // 发现页 feed 滚动容器捕获：供 ChannelGestureBlocker 做 feedAtTop/
         // feedPulledDown 判定（下拉刷新与进频道手势互斥依赖此引用）
