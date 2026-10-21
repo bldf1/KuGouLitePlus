@@ -2182,6 +2182,35 @@ object UiCleaner {
     }
 
     /** 挂载判定链（核心）：ID 制导即时预隐藏 + 文本关键词预隐藏 + 各专属路径 */
+    /** 规则 id 的 int 集合（懒初始化，随首次挂载用 view.resources 建立） */
+    @Volatile
+    private var ruleIdIntSet: Set<Int>? = null
+
+    private fun ensureRuleIdInts(view: View): Set<Int> {
+        ruleIdIntSet?.let { return it }
+        synchronized(this) {
+            ruleIdIntSet?.let { return it }
+            val set = try {
+                val res = view.resources
+                val pkg = view.context.packageName
+                val out = HashSet<Int>(idRuleMap.size * 2)
+                for (n in idRuleMap.keys) {
+                    try {
+                        val id = res.getIdentifier(n, "id", pkg)
+                        if (id != 0) out.add(id)
+                    } catch (_: Throwable) {
+                    }
+                }
+                out
+            } catch (_: Throwable) {
+                emptySet<Int>()
+            }
+            ruleIdIntSet = set
+            ModuleLog.log("UI净化: 规则 id 集合预建 ${set.size} 个")
+            return set
+        }
+    }
+
     private fun onViewAttached(view: View) {
         val name = view.javaClass.name
         val ctx = view.context
@@ -2210,7 +2239,14 @@ object UiCleaner {
         }
 
         // ID 制导规则：idRuleMap O(1) 查表；即时预隐藏 + 统一复核调度器
-        val rnAttach = resourceName(view)
+        // ⭐ R166：先按 int id 判断是否可能是规则目标，命中才查资源名。
+        // 原实现对**每个**挂载视图都调 resourceName —— 冷启首次打开「最近」
+        // （583 首列表，400+ 不同 id）全是缓存 miss，每次都走
+        // Resources.getResourceEntryName（AssetManager 查表+字符串分配），
+        // 累积成 80ms 级长帧（实测 95th 由基线 29ms 抬到 109ms）。
+        val __ruleIds = ensureRuleIdInts(view)
+        val rnAttach =
+            if (view.id == View.NO_ID || view.id !in __ruleIds) null else resourceName(view)
         if (rnAttach != null) {
             val rules = idRuleMap[rnAttach]
             if (rules != null) {
